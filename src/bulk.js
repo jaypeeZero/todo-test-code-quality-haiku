@@ -1,9 +1,7 @@
-// Bulk operations and export module
 
 const { getAll, getById, update } = require('./db');
 const { logAction } = require('./logging');
 
-// Helper to escape CSV values
 function escapeCSV(value) {
   if (value === null || value === undefined) {
     return '';
@@ -15,7 +13,6 @@ function escapeCSV(value) {
   return strValue;
 }
 
-// Helper to generate CSV row
 function toCSVRow(fields) {
   return fields.map(escapeCSV).join(',');
 }
@@ -29,9 +26,7 @@ function formatDate(dateStr) {
   return '';
 }
 
-// Register bulk operation routes
 function registerBulkRoutes(app, requireAuth) {
-  // POST /todos/bulk-complete - Mark multiple todos as done
   app.post('/todos/bulk-complete', requireAuth, async (req, res) => {
     const { ids } = req.body;
 
@@ -57,7 +52,6 @@ function registerBulkRoutes(app, requireAuth) {
             continue;
           }
 
-          // Update todo
           const now = new Date().toISOString();
           todo.status = 'done';
           todo.completed_at = now;
@@ -65,7 +59,6 @@ function registerBulkRoutes(app, requireAuth) {
 
           await update('todos', id, todo);
 
-          // Log the action
           await logAction(req.user.id, req.user.username, 'bulk_complete_todo', id, {});
 
           completed.push(id);
@@ -80,7 +73,6 @@ function registerBulkRoutes(app, requireAuth) {
     }
   });
 
-  // POST /todos/bulk-update - Update multiple todos
   app.post('/todos/bulk-update', requireAuth, async (req, res) => {
     const { ids, changes } = req.body;
 
@@ -105,7 +97,6 @@ function registerBulkRoutes(app, requireAuth) {
             continue;
           }
 
-          // Apply changes
           let hasChanges = false;
           const changeLog = {};
 
@@ -121,7 +112,6 @@ function registerBulkRoutes(app, requireAuth) {
           }
 
           if (changes.project_id !== undefined && changes.project_id !== todo.project_id) {
-            // If project_id is not null, verify project exists
             if (changes.project_id !== null) {
               const project = await getById('projects', changes.project_id);
               if (!project) {
@@ -203,7 +193,6 @@ function registerBulkRoutes(app, requireAuth) {
     }
   });
 
-  // POST /todos/bulk-archive - Archive multiple todos
   app.post('/todos/bulk-archive', requireAuth, async (req, res) => {
     const { ids } = req.body;
 
@@ -224,14 +213,12 @@ function registerBulkRoutes(app, requireAuth) {
             continue;
           }
 
-          // Archive todo
           const now = new Date().toISOString();
           todo.archived = true;
           todo.archived_at = now;
 
           await update('todos', id, todo);
 
-          // Log the action
           await logAction(req.user.id, req.user.username, 'bulk_archive_todo', id, {});
 
           archived.push(id);
@@ -257,13 +244,11 @@ function registerBulkRoutes(app, requireAuth) {
         return res.status(200).set('Content-Type', 'text/csv').send('id,title,status,priority,due_date,project_id,created_by,created_at,completed_at\n');
       }
 
-      // Filter based on include_archived
       let filtered = todos;
       if (include_archived !== 'true') {
         filtered = todos.filter(todo => !todo.archived);
       }
 
-      // Build CSV
       const headers = ['id', 'title', 'status', 'priority', 'due_date', 'project_id', 'created_by', 'created_at', 'completed_at'];
       let csv = toCSVRow(headers) + '\n';
 
@@ -295,7 +280,6 @@ function registerBulkRoutes(app, requireAuth) {
     const { id } = req.params;
 
     try {
-      // Verify project exists
       const project = await getById('projects', id);
       if (!project) {
         return res.status(404).json({ error: 'project not found' });
@@ -307,12 +291,10 @@ function registerBulkRoutes(app, requireAuth) {
         return res.status(200).set('Content-Type', 'text/csv').send('id,title,status,priority,due_date,project_id,created_by,created_at,completed_at\n');
       }
 
-      // Filter for this project and non-archived todos
       const filtered = todos.filter(todo =>
         todo.project_id === parseInt(id) && !todo.archived
       );
 
-      // Build CSV
       const headers = ['id', 'title', 'status', 'priority', 'due_date', 'project_id', 'created_by', 'created_at', 'completed_at'];
       let csv = toCSVRow(headers) + '\n';
 

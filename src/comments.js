@@ -1,4 +1,3 @@
-// Comments module for todos
 
 const { getAll, getById, insert, update, remove } = require('./db');
 const { logAction } = require('./logging');
@@ -17,29 +16,25 @@ async function getComments(todoId) {
     return comments;
   } catch (error) {
     console.error('Error fetching comments:', error);
-    return [];
+    throw error;
   }
 }
 
-// Helper to get comment count for a todo
 async function getCommentCount(todoId) {
   try {
     const comments = await getComments(todoId);
     return comments.length;
   } catch (error) {
     console.error('Error getting comment count:', error);
-    return 0;
+    throw error;
   }
 }
 
-// Register comment routes
 function registerCommentRoutes(app, requireAuth) {
-  // POST /todos/:id/comments - Create a comment
   app.post('/todos/:id/comments', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { body } = req.body;
 
-    // Validate body
     if (!body || typeof body !== 'string' || !body.trim()) {
       return res.status(400).json({ error: 'body is required' });
     }
@@ -49,7 +44,6 @@ function registerCommentRoutes(app, requireAuth) {
     }
 
     try {
-      // Validate todo exists
       const todo = await getById('todos', id);
       if (!todo) {
         return res.status(404).json({ error: 'todo not found' });
@@ -67,17 +61,14 @@ function registerCommentRoutes(app, requireAuth) {
 
       const comment = await insert('comments', commentRecord);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'create_comment', parseInt(id), {
         comment_id: comment.id,
         body: trimmedBody
       });
 
-      // Publish comment event to assignees and creator
       const assignees = await getAssignees(parseInt(id));
       const assigneeIds = new Set(assignees.map(a => a.id));
 
-      // Publish to all assignees
       for (const assignee of assignees) {
         await publishToUser(assignee.id, {
           type: 'comment.created',
@@ -104,7 +95,6 @@ function registerCommentRoutes(app, requireAuth) {
     }
   });
 
-  // GET /todos/:id/comments - List comments for a todo
   app.get('/todos/:id/comments', requireAuth, async (req, res) => {
     const { id } = req.params;
 
@@ -122,7 +112,6 @@ function registerCommentRoutes(app, requireAuth) {
     }
   });
 
-  // PUT /todos/:id/comments/:commentId - Edit a comment
   app.put('/todos/:id/comments/:commentId', requireAuth, async (req, res) => {
     const { id, commentId } = req.params;
     const { body } = req.body;
@@ -138,12 +127,10 @@ function registerCommentRoutes(app, requireAuth) {
         return res.status(404).json({ error: 'comment not found' });
       }
 
-      // Check if user is the author
       if (comment.user_id !== req.user.id) {
         return res.status(403).json({ error: 'only the comment author may edit this comment' });
       }
 
-      // Validate body
       if (!body || typeof body !== 'string' || !body.trim()) {
         return res.status(400).json({ error: 'body is required' });
       }
@@ -152,7 +139,6 @@ function registerCommentRoutes(app, requireAuth) {
         return res.status(400).json({ error: 'body too long (max 1000)' });
       }
 
-      // Update comment
       const updatedComment = {
         ...comment,
         body: trimmedBody,
@@ -162,7 +148,6 @@ function registerCommentRoutes(app, requireAuth) {
 
       await update('comments', commentId, updatedComment);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'edit_comment', parseInt(id), {
         comment_id: parseInt(commentId)
       });
@@ -174,7 +159,6 @@ function registerCommentRoutes(app, requireAuth) {
     }
   });
 
-  // DELETE /todos/:id/comments/:commentId - Delete a comment
   app.delete('/todos/:id/comments/:commentId', requireAuth, async (req, res) => {
     const { id, commentId } = req.params;
 
@@ -189,14 +173,12 @@ function registerCommentRoutes(app, requireAuth) {
         return res.status(404).json({ error: 'comment not found' });
       }
 
-      // Check if user is the author
       if (comment.user_id !== req.user.id) {
         return res.status(403).json({ error: 'only the comment author may delete this comment' });
       }
 
       await remove('comments', commentId);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'delete_comment', parseInt(id), {
         comment_id: parseInt(commentId)
       });

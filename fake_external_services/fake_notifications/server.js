@@ -1,48 +1,47 @@
 const express = require('express');
 
-const PORT = process.env.FAKE_NOTIFY_PORT || 4002;
-const API_KEY = process.env.FAKE_NOTIFY_API_KEY || 'test-key-123';
+function start() {
+  const PORT = process.env.FAKE_NOTIFY_PORT || 4002;
+  const API_KEY = process.env.FAKE_NOTIFY_API_KEY || 'test-key-123';
 
-const notifications = [];
-let nextId = 1;
+  const notifications = [];
+  let nextId = 1;
 
-// Topics and events storage
-const topics = {}; // { topicName: { events: [...], subscribers: [...] } }
-let nextEventId = 1;
+  const topics = {}; // { topicName: { events: [...], subscribers: [...] } }
+  let nextEventId = 1;
 
-const app = express();
+  const app = express();
 
-app.use(express.json());
+  app.use(express.json());
 
-// CORS headers for SSE stream endpoints
-app.use((req, res, next) => {
-  if (req.path.match(/^\/topics\/[^\/]+\/stream$/)) {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-  }
-  next();
-});
+  // CORS headers for SSE stream endpoints
+  app.use((req, res, next) => {
+    if (req.path.match(/^\/topics\/[^\/]+\/stream$/)) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    next();
+  });
 
-// Middleware for API key validation (except /health and SSE streams)
-app.use((req, res, next) => {
-  if (req.path === '/health') {
-    return next();
-  }
+  // Middleware for API key validation (except /health and SSE streams)
+  app.use((req, res, next) => {
+    if (req.path === '/health') {
+      return next();
+    }
 
-  // Allow SSE stream endpoints without auth
-  if (req.path.match(/^\/topics\/[^\/]+\/stream$/)) {
-    return next();
-  }
+    // Allow SSE stream endpoints without auth
+    if (req.path.match(/^\/topics\/[^\/]+\/stream$/)) {
+      return next();
+    }
 
-  const apiKey = req.headers['x-api-key'];
-  if (apiKey !== API_KEY) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey !== API_KEY) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
 
-  next();
-});
+    next();
+  });
 
-// POST /send endpoint
-app.post('/send', (req, res) => {
+  app.post('/send', (req, res) => {
   // 1 in 10 chance of simulating a failure
   if (Math.random() < 0.1) {
     return res.status(500).json({ error: 'provider temporarily unavailable' });
@@ -80,7 +79,6 @@ app.post('/send', (req, res) => {
   }
 });
 
-// POST /topics/:topic/publish endpoint
 app.post('/topics/:topic/publish', (req, res) => {
   const { topic } = req.params;
   const payload = req.body;
@@ -92,13 +90,11 @@ app.post('/topics/:topic/publish', (req, res) => {
     payload
   };
 
-  // Store event in topic
   if (!topics[topic]) {
     topics[topic] = { events: [], subscribers: [] };
   }
   topics[topic].events.push(event);
 
-  // Send to all subscribers
   const delivered = publishToTopic(topic, event);
 
   res.status(202).json({
@@ -107,7 +103,6 @@ app.post('/topics/:topic/publish', (req, res) => {
   });
 });
 
-// GET /topics/:topic/events endpoint
 app.get('/topics/:topic/events', (req, res) => {
   const { topic } = req.params;
   const topicData = topics[topic];
@@ -119,25 +114,20 @@ app.get('/topics/:topic/events', (req, res) => {
   res.json(topicData.events);
 });
 
-// GET /topics/:topic/stream endpoint (SSE)
 app.get('/topics/:topic/stream', (req, res) => {
   const { topic } = req.params;
 
-  // Set up SSE headers
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
 
-  // Initialize topic if it doesn't exist
   if (!topics[topic]) {
     topics[topic] = { events: [], subscribers: [] };
   }
 
-  // Add this connection to subscribers
   const subscriber = res;
   topics[topic].subscribers.push(subscriber);
 
-  // Send initial connected message
   res.write('event: connected\n');
   res.write(`data: {"topic":"${topic}"}\n\n`);
 
@@ -156,7 +146,6 @@ app.get('/topics/:topic/stream', (req, res) => {
   });
 });
 
-// GET /topics endpoint
 app.get('/topics', (req, res) => {
   const topicsList = Object.keys(topics).map(name => ({
     name,
@@ -167,7 +156,6 @@ app.get('/topics', (req, res) => {
   res.json(topicsList);
 });
 
-// GET /sent endpoint
 app.get('/sent', (req, res) => {
   res.json(notifications);
 });
@@ -178,18 +166,15 @@ app.delete('/sent', (req, res) => {
   res.status(204).send();
 });
 
-// GET /health endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Helper function to publish an event to a topic and send to all subscribers
 function publishToTopic(topicName, event) {
   if (!topics[topicName]) {
     topics[topicName] = { events: [], subscribers: [] };
   }
 
-  // Send to all subscribers
   let delivered = 0;
   topics[topicName].subscribers.forEach(subscriber => {
     try {
@@ -204,7 +189,6 @@ function publishToTopic(topicName, event) {
   return delivered;
 }
 
-function start() {
   const server = app.listen(PORT, () => {
     console.log(`Fake notification service listening on port ${PORT}`);
   });

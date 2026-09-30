@@ -1,32 +1,46 @@
-// Initiatives module for cross-project goals
 
 const { getAll, getById, insert, update, remove } = require('./db');
 const { logAction } = require('./logging');
 const { publishEvent } = require('./notifications');
 
-// Register initiative routes
+const INITIATIVES_TABLE = 'initiatives';
+const INITIATIVE_PROJECTS_TABLE = 'initiative_projects';
+const INITIATIVE_TODOS_TABLE = 'initiative_todos';
+const PROJECTS_TABLE = 'projects';
+const TODOS_TABLE = 'todos';
+
+const STATUS_BAD_REQUEST = 400;
+const STATUS_NOT_FOUND = 404;
+const STATUS_CREATED = 201;
+const STATUS_SERVER_ERROR = 500;
+
+const ERROR_NAME_REQUIRED = 'name is required';
+const ERROR_NAME_TOO_LONG_200 = 'name too long (max 200)';
+const ERROR_DESCRIPTION_TOO_LONG_2000 = 'description too long (max 2000)';
+const ERROR_INITIATIVE_NOT_FOUND = 'initiative not found';
+
+const STATUS_DONE = 'done';
+const STATUS_ACTIVE = 'active';
+const STATUS_COMPLETED = 'completed';
+
 function registerInitiativeRoutes(app, requireAuth) {
-  // POST /initiatives - Create an initiative
   app.post('/initiatives', requireAuth, async (req, res) => {
     const { name, description, project_ids } = req.body;
 
-    // Validate name
     if (!name || typeof name !== 'string' || !name.trim()) {
-      return res.status(400).json({ error: 'name is required' });
+      return res.status(STATUS_BAD_REQUEST).json({ error: ERROR_NAME_REQUIRED });
     }
     const trimmedName = name.trim();
     if (trimmedName.length > 200) {
-      return res.status(400).json({ error: 'name too long (max 200)' });
+      return res.status(STATUS_BAD_REQUEST).json({ error: ERROR_NAME_TOO_LONG_200 });
     }
 
-    // Validate project_ids
     if (!Array.isArray(project_ids) || project_ids.length === 0) {
-      return res.status(400).json({ error: 'project_ids must be a non-empty array' });
+      return res.status(STATUS_BAD_REQUEST).json({ error: 'project_ids must be a non-empty array' });
     }
 
     try {
-      // Verify all projects exist
-      const allProjects = await getAll('projects');
+      const allProjects = await getAll(PROJECTS_TABLE);
       const projectMap = {};
       if (Array.isArray(allProjects)) {
         allProjects.forEach(p => {
@@ -36,16 +50,15 @@ function registerInitiativeRoutes(app, requireAuth) {
 
       for (const projectId of project_ids) {
         if (!projectMap[projectId]) {
-          return res.status(400).json({ error: `project ${projectId} not found` });
+          return res.status(STATUS_BAD_REQUEST).json({ error: `project ${projectId} not found` });
         }
       }
 
-      // Validate description
       let trimmedDescription = description;
       if (description !== undefined && description !== null) {
         trimmedDescription = String(description).trim();
         if (trimmedDescription.length > 2000) {
-          return res.status(400).json({ error: 'description too long (max 2000)' });
+          return res.status(STATUS_BAD_REQUEST).json({ error: ERROR_DESCRIPTION_TOO_LONG_2000 });
         }
       }
 
@@ -53,16 +66,15 @@ function registerInitiativeRoutes(app, requireAuth) {
       const initiativeRecord = {
         name: trimmedName,
         description: trimmedDescription || null,
-        status: 'active',
+        status: STATUS_ACTIVE,
         created_by: req.user.id,
         created_at: now,
         updated_at: now,
         completed_at: null
       };
 
-      const initiative = await insert('initiatives', initiativeRecord);
+      const initiative = await insert(INITIATIVES_TABLE, initiativeRecord);
 
-      // Create initiative_projects links
       for (const projectId of project_ids) {
         await insert('initiative_projects', {
           initiative_id: initiative.id,
@@ -70,90 +82,83 @@ function registerInitiativeRoutes(app, requireAuth) {
         });
       }
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'create_initiative', initiative.id, {
         name: trimmedName,
         project_ids
       });
 
-      // Return initiative with projects and counts
       const response = await enrichInitiative(initiative);
-      res.status(201).json(response);
+      res.status(STATUS_CREATED).json(response);
     } catch (error) {
       console.error('Create initiative error:', error);
-      res.status(500).json({ error: 'failed to create initiative' });
+      res.status(STATUS_SERVER_ERROR).json({ error: 'failed to create initiative' });
     }
   });
 
-  // GET /initiatives - List all initiatives
   app.get('/initiatives', requireAuth, async (req, res) => {
     try {
-      const initiatives = await getAll('initiatives');
+      const initiatives = await getAll(INITIATIVES_TABLE);
       const result = Array.isArray(initiatives) ? initiatives : [];
 
       const enriched = await Promise.all(result.map(init => enrichInitiative(init)));
 
       res.json(enriched);
     } catch (error) {
-      res.status(500).json({ error: 'failed to list initiatives' });
+      res.status(STATUS_SERVER_ERROR).json({ error: 'failed to list initiatives' });
     }
   });
 
-  // GET /initiatives/:id - Get a single initiative
   app.get('/initiatives/:id', requireAuth, async (req, res) => {
     const { id } = req.params;
 
     try {
-      const initiative = await getById('initiatives', id);
+      const initiative = await getById(INITIATIVES_TABLE, id);
       if (!initiative) {
-        return res.status(404).json({ error: 'initiative not found' });
+        return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
       const response = await enrichInitiative(initiative);
       res.json(response);
     } catch (error) {
-      res.status(404).json({ error: 'initiative not found' });
+      res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
     }
   });
 
-  // GET /initiatives/:id/progress - Get initiative progress
   app.get('/initiatives/:id/progress', requireAuth, async (req, res) => {
     const { id } = req.params;
 
     try {
-      const initiative = await getById('initiatives', id);
+      const initiative = await getById(INITIATIVES_TABLE, id);
       if (!initiative) {
-        return res.status(404).json({ error: 'initiative not found' });
+        return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
       const progress = await calculateProgress(parseInt(id));
       res.json(progress);
     } catch (error) {
-      res.status(404).json({ error: 'initiative not found' });
+      res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
     }
   });
 
-  // PUT /initiatives/:id - Update an initiative
   app.put('/initiatives/:id', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { name, description } = req.body;
 
     try {
-      const initiative = await getById('initiatives', id);
+      const initiative = await getById(INITIATIVES_TABLE, id);
       if (!initiative) {
-        return res.status(404).json({ error: 'initiative not found' });
+        return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
       const changes = {};
 
-      // Validate name if provided
       if (name !== undefined) {
         if (!name || typeof name !== 'string' || !name.trim()) {
-          return res.status(400).json({ error: 'name is required' });
+          return res.status(STATUS_BAD_REQUEST).json({ error: ERROR_NAME_REQUIRED });
         }
         const trimmedName = name.trim();
         if (trimmedName.length > 200) {
-          return res.status(400).json({ error: 'name too long (max 200)' });
+          return res.status(STATUS_BAD_REQUEST).json({ error: ERROR_NAME_TOO_LONG_200 });
         }
         if (trimmedName !== initiative.name) {
           changes.name = { from: initiative.name, to: trimmedName };
@@ -161,11 +166,10 @@ function registerInitiativeRoutes(app, requireAuth) {
         }
       }
 
-      // Validate description if provided
       if (description !== undefined && description !== null) {
         const trimmedDesc = String(description).trim();
         if (trimmedDesc.length > 2000) {
-          return res.status(400).json({ error: 'description too long (max 2000)' });
+          return res.status(STATUS_BAD_REQUEST).json({ error: ERROR_DESCRIPTION_TOO_LONG_2000 });
         }
         if (trimmedDesc !== initiative.description) {
           changes.description = { from: initiative.description, to: trimmedDesc || null };
@@ -177,10 +181,8 @@ function registerInitiativeRoutes(app, requireAuth) {
 
       await update('initiatives', id, initiative);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'update_initiative', parseInt(id), changes);
 
-      // Publish event
       await publishEvent('initiatives', {
         type: 'initiative.updated',
         initiative,
@@ -190,7 +192,7 @@ function registerInitiativeRoutes(app, requireAuth) {
       const response = await enrichInitiative(initiative);
       res.json(response);
     } catch (error) {
-      res.status(404).json({ error: 'initiative not found' });
+      res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
     }
   });
 
@@ -199,14 +201,13 @@ function registerInitiativeRoutes(app, requireAuth) {
     const { id } = req.params;
 
     try {
-      const initiative = await getById('initiatives', id);
+      const initiative = await getById(INITIATIVES_TABLE, id);
       if (!initiative) {
-        return res.status(404).json({ error: 'initiative not found' });
+        return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
-      // Delete initiative_projects links
       try {
-        const allLinks = await getAll('initiative_projects');
+        const allLinks = await getAll(INITIATIVE_PROJECTS_TABLE);
         if (Array.isArray(allLinks)) {
           for (const link of allLinks) {
             if (link.initiative_id === parseInt(id)) {
@@ -218,7 +219,6 @@ function registerInitiativeRoutes(app, requireAuth) {
         console.error('Error deleting initiative_projects:', error);
       }
 
-      // Delete initiative_todos links
       try {
         const allTodos = await getAll('initiative_todos');
         if (Array.isArray(allTodos)) {
@@ -237,7 +237,6 @@ function registerInitiativeRoutes(app, requireAuth) {
       // Log the action
       await logAction(req.user.id, req.user.username, 'delete_initiative', parseInt(id), {});
 
-      // Publish event
       await publishEvent('initiatives', {
         type: 'initiative.deleted',
         initiative,
@@ -246,35 +245,32 @@ function registerInitiativeRoutes(app, requireAuth) {
 
       res.status(204).send();
     } catch (error) {
-      res.status(404).json({ error: 'initiative not found' });
+      res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
     }
   });
 
-  // POST /initiatives/:id/projects - Add a project to an initiative
   app.post('/initiatives/:id/projects', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { project_id } = req.body;
 
     try {
-      const initiative = await getById('initiatives', id);
+      const initiative = await getById(INITIATIVES_TABLE, id);
       if (!initiative) {
-        return res.status(404).json({ error: 'initiative not found' });
+        return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
-      // Verify project exists
-      const project = await getById('projects', project_id);
+      const project = await getById(PROJECTS_TABLE, project_id);
       if (!project) {
-        return res.status(404).json({ error: 'project not found' });
+        return res.status(STATUS_NOT_FOUND).json({ error: 'project not found' });
       }
 
-      // Check if already linked
-      const allLinks = await getAll('initiative_projects');
+      const allLinks = await getAll(INITIATIVE_PROJECTS_TABLE);
       if (Array.isArray(allLinks)) {
         const exists = allLinks.some(
           l => l.initiative_id === parseInt(id) && l.project_id === parseInt(project_id)
         );
         if (exists) {
-          return res.status(400).json({ error: 'project already linked to this initiative' });
+          return res.status(STATUS_BAD_REQUEST).json({ error: 'project already linked to this initiative' });
         }
       }
 
@@ -283,12 +279,10 @@ function registerInitiativeRoutes(app, requireAuth) {
         project_id: parseInt(project_id)
       });
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'add_initiative_project', parseInt(id), {
         project_id: parseInt(project_id)
       });
 
-      // Publish event
       await publishEvent('initiatives', {
         type: 'initiative.project_added',
         initiative_id: parseInt(id),
@@ -297,34 +291,32 @@ function registerInitiativeRoutes(app, requireAuth) {
       });
 
       const response = await enrichInitiative(initiative);
-      res.status(201).json(response);
+      res.status(STATUS_CREATED).json(response);
     } catch (error) {
       console.error('Add project error:', error);
-      res.status(500).json({ error: 'failed to add project' });
+      res.status(STATUS_SERVER_ERROR).json({ error: 'failed to add project' });
     }
   });
 
-  // DELETE /initiatives/:id/projects/:projectId - Remove a project from an initiative
   app.delete('/initiatives/:id/projects/:projectId', requireAuth, async (req, res) => {
     const { id, projectId } = req.params;
 
     try {
-      const initiative = await getById('initiatives', id);
+      const initiative = await getById(INITIATIVES_TABLE, id);
       if (!initiative) {
-        return res.status(404).json({ error: 'initiative not found' });
+        return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
       // Check that initiative has at least one other project
-      const allLinks = await getAll('initiative_projects');
+      const allLinks = await getAll(INITIATIVE_PROJECTS_TABLE);
       const initiativeProjects = Array.isArray(allLinks)
         ? allLinks.filter(l => l.initiative_id === parseInt(id))
         : [];
 
       if (initiativeProjects.length <= 1) {
-        return res.status(400).json({ error: 'initiative must have at least one project' });
+        return res.status(STATUS_BAD_REQUEST).json({ error: 'initiative must have at least one project' });
       }
 
-      // Find and delete the link
       let found = false;
       for (const link of initiativeProjects) {
         if (link.project_id === parseInt(projectId)) {
@@ -335,15 +327,13 @@ function registerInitiativeRoutes(app, requireAuth) {
       }
 
       if (!found) {
-        return res.status(404).json({ error: 'project not linked to this initiative' });
+        return res.status(STATUS_NOT_FOUND).json({ error: 'project not linked to this initiative' });
       }
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'remove_initiative_project', parseInt(id), {
         project_id: parseInt(projectId)
       });
 
-      // Publish event
       await publishEvent('initiatives', {
         type: 'initiative.project_removed',
         initiative_id: parseInt(id),
@@ -353,27 +343,25 @@ function registerInitiativeRoutes(app, requireAuth) {
 
       res.status(204).send();
     } catch (error) {
-      res.status(500).json({ error: 'failed to remove project' });
+      res.status(STATUS_SERVER_ERROR).json({ error: 'failed to remove project' });
     }
   });
 
-  // POST /initiatives/:id/todos - Add a todo to an initiative
   app.post('/initiatives/:id/todos', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { todo_id } = req.body;
 
     try {
-      const initiative = await getById('initiatives', id);
+      const initiative = await getById(INITIATIVES_TABLE, id);
       if (!initiative) {
-        return res.status(404).json({ error: 'initiative not found' });
+        return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
-      const todo = await getById('todos', todo_id);
+      const todo = await getById(TODOS_TABLE, todo_id);
       if (!todo) {
-        return res.status(404).json({ error: 'todo not found' });
+        return res.status(STATUS_NOT_FOUND).json({ error: 'todo not found' });
       }
 
-      // Get initiative's projects
       const allInitiativeProjects = await getAll('initiative_projects');
       const initiativeProjectIds = Array.isArray(allInitiativeProjects)
         ? allInitiativeProjects
@@ -383,19 +371,18 @@ function registerInitiativeRoutes(app, requireAuth) {
 
       // Verify todo's project is one of the initiative's projects
       if (!initiativeProjectIds.includes(todo.project_id)) {
-        return res.status(400).json({
+        return res.status(STATUS_BAD_REQUEST).json({
           error: "todo's project is not in this initiative's projects"
         });
       }
 
-      // Check if todo is already in any initiative
-      const allInitiativeTodos = await getAll('initiative_todos');
+      const allInitiativeTodos = await getAll(INITIATIVE_TODOS_TABLE);
       if (Array.isArray(allInitiativeTodos)) {
         const alreadyLinked = allInitiativeTodos.some(
           l => l.todo_id === parseInt(todo_id)
         );
         if (alreadyLinked) {
-          return res.status(400).json({ error: 'todo already belongs to an initiative' });
+          return res.status(STATUS_BAD_REQUEST).json({ error: 'todo already belongs to an initiative' });
         }
       }
 
@@ -404,33 +391,30 @@ function registerInitiativeRoutes(app, requireAuth) {
         todo_id: parseInt(todo_id)
       });
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'add_initiative_todo', parseInt(id), {
         todo_id: parseInt(todo_id)
       });
 
-      // Recalculate progress and potentially auto-complete
       await recalculateInitiativeForTodo(parseInt(todo_id));
 
       const response = await enrichInitiative(initiative);
-      res.status(201).json(response);
+      res.status(STATUS_CREATED).json(response);
     } catch (error) {
       console.error('Add todo error:', error);
-      res.status(500).json({ error: 'failed to add todo' });
+      res.status(STATUS_SERVER_ERROR).json({ error: 'failed to add todo' });
     }
   });
 
-  // DELETE /initiatives/:id/todos/:todoId - Remove a todo from an initiative
   app.delete('/initiatives/:id/todos/:todoId', requireAuth, async (req, res) => {
     const { id, todoId } = req.params;
 
     try {
-      const initiative = await getById('initiatives', id);
+      const initiative = await getById(INITIATIVES_TABLE, id);
       if (!initiative) {
-        return res.status(404).json({ error: 'initiative not found' });
+        return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
-      const allInitiativeTodos = await getAll('initiative_todos');
+      const allInitiativeTodos = await getAll(INITIATIVE_TODOS_TABLE);
       let found = false;
       if (Array.isArray(allInitiativeTodos)) {
         for (const link of allInitiativeTodos) {
@@ -443,15 +427,13 @@ function registerInitiativeRoutes(app, requireAuth) {
       }
 
       if (!found) {
-        return res.status(404).json({ error: 'todo not linked to this initiative' });
+        return res.status(STATUS_NOT_FOUND).json({ error: 'todo not linked to this initiative' });
       }
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'remove_initiative_todo', parseInt(id), {
         todo_id: parseInt(todoId)
       });
 
-      // Publish event
       await publishEvent('initiatives', {
         type: 'initiative.todo_removed',
         initiative_id: parseInt(id),
@@ -461,12 +443,11 @@ function registerInitiativeRoutes(app, requireAuth) {
 
       res.status(204).send();
     } catch (error) {
-      res.status(500).json({ error: 'failed to remove todo' });
+      res.status(STATUS_SERVER_ERROR).json({ error: 'failed to remove todo' });
     }
   });
 }
 
-// Helper function to enrich an initiative with projects and counts
 async function enrichInitiative(initiative) {
   const projects = await getInitiativeProjects(initiative.id);
   const progress = await calculateProgress(initiative.id);
@@ -480,11 +461,10 @@ async function enrichInitiative(initiative) {
   };
 }
 
-// Helper function to get projects for an initiative
 async function getInitiativeProjects(initiativeId) {
   try {
     const allProjects = await getAll('projects');
-    const allLinks = await getAll('initiative_projects');
+    const allLinks = await getAll(INITIATIVE_PROJECTS_TABLE);
 
     if (!Array.isArray(allLinks)) {
       return [];
@@ -503,15 +483,14 @@ async function getInitiativeProjects(initiativeId) {
       .map(p => ({ id: p.id, name: p.name }));
   } catch (error) {
     console.error('Error getting initiative projects:', error);
-    return [];
+    throw error;
   }
 }
 
-// Helper function to calculate progress for an initiative
 async function calculateProgress(initiativeId) {
   try {
-    const allInitiativeTodos = await getAll('initiative_todos');
-    const allTodos = await getAll('todos');
+    const allInitiativeTodos = await getAll(INITIATIVE_TODOS_TABLE);
+    const allTodos = await getAll(TODOS_TABLE);
 
     const todoIds = Array.isArray(allInitiativeTodos)
       ? allInitiativeTodos
@@ -524,7 +503,7 @@ async function calculateProgress(initiativeId) {
         total: 0,
         done: 0,
         percent: 0,
-        status: 'active'
+        status: STATUS_ACTIVE
       };
     }
 
@@ -533,10 +512,9 @@ async function calculateProgress(initiativeId) {
       : [];
 
     const total = initiativeTodos.length;
-    const done = initiativeTodos.filter(t => t.status === 'done').length;
+    const done = initiativeTodos.filter(t => t.status === STATUS_DONE).length;
     const percent = total === 0 ? 0 : Math.round((done / total) * 100);
 
-    // Determine status based on progress
     let status = 'active';
     if (total > 0 && done === total) {
       status = 'completed';
@@ -550,20 +528,13 @@ async function calculateProgress(initiativeId) {
     };
   } catch (error) {
     console.error('Error calculating progress:', error);
-    return {
-      total: 0,
-      done: 0,
-      percent: 0,
-      status: 'active'
-    };
+    throw error;
   }
 }
 
-// Main function to recalculate initiative status when a todo changes
 async function recalculateInitiativeForTodo(todoId) {
   try {
-    // Find the initiative this todo belongs to
-    const allInitiativeTodos = await getAll('initiative_todos');
+    const allInitiativeTodos = await getAll(INITIATIVE_TODOS_TABLE);
     if (!Array.isArray(allInitiativeTodos)) {
       return;
     }
@@ -579,10 +550,8 @@ async function recalculateInitiativeForTodo(todoId) {
       return;
     }
 
-    // Calculate new progress
     const progress = await calculateProgress(initiativeId);
 
-    // Determine new status
     let newStatus = 'active';
     let completedAt = null;
     if (progress.total > 0 && progress.done === progress.total) {
@@ -590,14 +559,12 @@ async function recalculateInitiativeForTodo(todoId) {
       completedAt = new Date().toISOString();
     }
 
-    // Update initiative if status changed
     if (initiative.status !== newStatus) {
       initiative.status = newStatus;
       initiative.completed_at = completedAt;
       initiative.updated_at = new Date().toISOString();
-      await update('initiatives', initiativeId, initiative);
+      await update(INITIATIVES_TABLE, initiativeId, initiative);
 
-      // Publish completion event if just completed
       if (newStatus === 'completed') {
         await publishEvent('initiatives', {
           type: 'initiative.completed',
@@ -621,6 +588,7 @@ async function recalculateInitiativeForTodo(todoId) {
     });
   } catch (error) {
     console.error('Error recalculating initiative for todo:', error);
+    throw error;
   }
 }
 

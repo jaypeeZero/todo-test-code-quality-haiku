@@ -3,13 +3,17 @@
 const { getAll, getById, insert, update, remove } = require('./db');
 const { logAction } = require('./logging');
 
-// Helper to get parent of a todo
+const TODO_LINKS_TABLE = 'todo_links';
+const PARENT_TYPE = 'parent';
+const SIBLING_TYPE = 'sibling';
+const TODOS_TABLE = 'todos';
+
 async function getParent(todoId) {
   try {
-    const links = await getAll('todo_links', { to_todo_id: todoId, type: 'parent' });
+    const links = await getAll(TODO_LINKS_TABLE, { to_todo_id: todoId, type: PARENT_TYPE });
     if (Array.isArray(links) && links.length > 0) {
       const parentLink = links[0];
-      const parent = await getById('todos', parentLink.from_todo_id);
+      const parent = await getById(TODOS_TABLE, parentLink.from_todo_id);
       if (parent && !parent.archived) {
         return parent;
       }
@@ -21,16 +25,15 @@ async function getParent(todoId) {
   }
 }
 
-// Helper to get children of a todo
 async function getChildren(todoId) {
   try {
-    const links = await getAll('todo_links', { from_todo_id: todoId, type: 'parent' });
+    const links = await getAll(TODO_LINKS_TABLE, { from_todo_id: todoId, type: PARENT_TYPE });
     if (!Array.isArray(links)) {
       return [];
     }
     const children = [];
     for (const link of links) {
-      const child = await getById('todos', link.to_todo_id);
+      const child = await getById(TODOS_TABLE, link.to_todo_id);
       if (child && !child.archived) {
         children.push(child);
       }
@@ -38,14 +41,13 @@ async function getChildren(todoId) {
     return children;
   } catch (error) {
     console.error('Error fetching children:', error);
-    return [];
+    throw error;
   }
 }
 
-// Helper to get siblings of a todo
 async function getSiblings(todoId) {
   try {
-    const links = await getAll('todo_links', { type: 'sibling' });
+    const links = await getAll(TODO_LINKS_TABLE, { type: SIBLING_TYPE });
     if (!Array.isArray(links)) {
       return [];
     }
@@ -58,7 +60,7 @@ async function getSiblings(todoId) {
         siblingId = link.from_todo_id;
       }
       if (siblingId !== null) {
-        const sibling = await getById('todos', siblingId);
+        const sibling = await getById(TODOS_TABLE, siblingId);
         if (sibling && !sibling.archived) {
           siblings.push(sibling);
         }
@@ -67,11 +69,10 @@ async function getSiblings(todoId) {
     return siblings;
   } catch (error) {
     console.error('Error fetching siblings:', error);
-    return [];
+    throw error;
   }
 }
 
-// Helper to get relations for a todo
 async function getRelations(todoId) {
   const parent = await getParent(todoId);
   const children = await getChildren(todoId);
@@ -83,7 +84,6 @@ async function getRelations(todoId) {
   };
 }
 
-// Register relationship routes
 function registerLinkRoutes(app, requireAuth) {
   // POST /todos/:id/children - Make :id the parent of child_id
   app.post('/todos/:id/children', requireAuth, async (req, res) => {
@@ -91,23 +91,20 @@ function registerLinkRoutes(app, requireAuth) {
     const { child_id } = req.body;
 
     try {
-      // Validate both todos exist
-      const parentTodo = await getById('todos', id);
+      const parentTodo = await getById(TODOS_TABLE, id);
       if (!parentTodo) {
         return res.status(404).json({ error: 'parent todo not found' });
       }
 
-      const childTodo = await getById('todos', child_id);
+      const childTodo = await getById(TODOS_TABLE, child_id);
       if (!childTodo) {
         return res.status(404).json({ error: 'child todo not found' });
       }
 
-      // Validate not same todo
       if (parseInt(id) === parseInt(child_id)) {
         return res.status(400).json({ error: 'cannot set todo as its own parent' });
       }
 
-      // Check if link already exists
       const existingLinks = await getAll('todo_links', {
         from_todo_id: id,
         to_todo_id: child_id,
@@ -117,24 +114,21 @@ function registerLinkRoutes(app, requireAuth) {
         return res.status(400).json({ error: 'parent-child relationship already exists' });
       }
 
-      // Check if child already has a parent
       const childLinks = await getAll('todo_links', { to_todo_id: child_id, type: 'parent' });
       if (Array.isArray(childLinks) && childLinks.length > 0) {
         return res.status(400).json({ error: 'child todo already has a parent' });
       }
 
-      // Create the link
       const linkRecord = {
         from_todo_id: parseInt(id),
         to_todo_id: parseInt(child_id),
-        type: 'parent',
+        type: PARENT_TYPE,
         created_by: req.user.id,
         created_at: new Date().toISOString()
       };
 
-      const link = await insert('todo_links', linkRecord);
+      const link = await insert(TODO_LINKS_TABLE, linkRecord);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'create_parent_child_link', parseInt(id), {
         child_id: parseInt(child_id)
       });
@@ -151,7 +145,6 @@ function registerLinkRoutes(app, requireAuth) {
     const { id, childId } = req.params;
 
     try {
-      // Find and delete the link
       const links = await getAll('todo_links', {
         from_todo_id: id,
         to_todo_id: childId,
@@ -163,9 +156,8 @@ function registerLinkRoutes(app, requireAuth) {
       }
 
       const link = links[0];
-      await remove('todo_links', link.id);
+      await remove(TODO_LINKS_TABLE, link.id);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'delete_parent_child_link', parseInt(id), {
         child_id: parseInt(childId)
       });
@@ -177,29 +169,25 @@ function registerLinkRoutes(app, requireAuth) {
     }
   });
 
-  // POST /todos/:id/siblings - Create a sibling relationship
   app.post('/todos/:id/siblings', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { sibling_id } = req.body;
 
     try {
-      // Validate both todos exist
-      const todo1 = await getById('todos', id);
+      const todo1 = await getById(TODOS_TABLE, id);
       if (!todo1) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      const todo2 = await getById('todos', sibling_id);
+      const todo2 = await getById(TODOS_TABLE, sibling_id);
       if (!todo2) {
         return res.status(404).json({ error: 'sibling todo not found' });
       }
 
-      // Validate not same todo
       if (parseInt(id) === parseInt(sibling_id)) {
         return res.status(400).json({ error: 'cannot set todo as its own sibling' });
       }
 
-      // Check if link already exists in either direction
       const existingLinks = await getAll('todo_links', { type: 'sibling' });
       if (Array.isArray(existingLinks)) {
         for (const link of existingLinks) {
@@ -217,14 +205,13 @@ function registerLinkRoutes(app, requireAuth) {
       const linkRecord = {
         from_todo_id: id1,
         to_todo_id: id2,
-        type: 'sibling',
+        type: SIBLING_TYPE,
         created_by: req.user.id,
         created_at: new Date().toISOString()
       };
 
-      const link = await insert('todo_links', linkRecord);
+      const link = await insert(TODO_LINKS_TABLE, linkRecord);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'create_sibling_link', parseInt(id), {
         sibling_id: parseInt(sibling_id)
       });
@@ -256,9 +243,8 @@ function registerLinkRoutes(app, requireAuth) {
       }
 
       const link = links[0];
-      await remove('todo_links', link.id);
+      await remove(TODO_LINKS_TABLE, link.id);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'delete_sibling_link', parseInt(id), {
         sibling_id: parseInt(siblingId)
       });
@@ -270,19 +256,17 @@ function registerLinkRoutes(app, requireAuth) {
     }
   });
 
-  // GET /todos/:id/relations - Get all relations for a todo
   app.get('/todos/:id/relations', requireAuth, async (req, res) => {
     const { id } = req.params;
 
     try {
-      const todo = await getById('todos', id);
+      const todo = await getById(TODOS_TABLE, id);
       if (!todo) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
       const relations = await getRelations(id);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'view_todo_relations', id, {});
 
       res.json(relations);

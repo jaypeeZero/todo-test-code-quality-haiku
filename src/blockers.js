@@ -3,16 +3,20 @@
 const { getAll, getById, insert, remove } = require('./db');
 const { logAction } = require('./logging');
 
+const TODO_LINKS_TABLE = 'todo_links';
+const BLOCKS_TYPE = 'blocks';
+const TODOS_TABLE = 'todos';
+
 // Helper to get all blockers of a todo (todos that block it)
 async function getBlockers(todoId) {
   try {
-    const links = await getAll('todo_links', { to_todo_id: todoId, type: 'blocks' });
+    const links = await getAll(TODO_LINKS_TABLE, { to_todo_id: todoId, type: BLOCKS_TYPE });
     if (!Array.isArray(links)) {
       return [];
     }
     const blockers = [];
     for (const link of links) {
-      const blocker = await getById('todos', link.from_todo_id);
+      const blocker = await getById(TODOS_TABLE, link.from_todo_id);
       if (blocker && !blocker.archived) {
         blockers.push(blocker);
       }
@@ -20,20 +24,20 @@ async function getBlockers(todoId) {
     return blockers;
   } catch (error) {
     console.error('Error fetching blockers:', error);
-    return [];
+    throw error;
   }
 }
 
 // Helper to get all todos blocked by this todo (todos it blocks)
 async function getBlocked(todoId) {
   try {
-    const links = await getAll('todo_links', { from_todo_id: todoId, type: 'blocks' });
+    const links = await getAll(TODO_LINKS_TABLE, { from_todo_id: todoId, type: BLOCKS_TYPE });
     if (!Array.isArray(links)) {
       return [];
     }
     const blocked = [];
     for (const link of links) {
-      const blockedTodo = await getById('todos', link.to_todo_id);
+      const blockedTodo = await getById(TODOS_TABLE, link.to_todo_id);
       if (blockedTodo && !blockedTodo.archived) {
         blocked.push(blockedTodo);
       }
@@ -41,7 +45,7 @@ async function getBlocked(todoId) {
     return blocked;
   } catch (error) {
     console.error('Error fetching blocked todos:', error);
-    return [];
+    throw error;
   }
 }
 
@@ -78,12 +82,12 @@ async function canReachViaBlocks(fromId, targetId, visited = new Set()) {
     }
   } catch (error) {
     console.error('Error checking blocking chain:', error);
+    throw error;
   }
 
   return false;
 }
 
-// Register blocker routes
 function registerBlockerRoutes(app, requireAuth) {
   // POST /todos/:id/blockers - Add a blocker to a todo
   app.post('/todos/:id/blockers', requireAuth, async (req, res) => {
@@ -91,27 +95,24 @@ function registerBlockerRoutes(app, requireAuth) {
     const { blocker_id } = req.body;
 
     try {
-      // Validate both todos exist
-      const todo = await getById('todos', id);
+      const todo = await getById(TODOS_TABLE, id);
       if (!todo) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      const blocker = await getById('todos', blocker_id);
+      const blocker = await getById(TODOS_TABLE, blocker_id);
       if (!blocker) {
         return res.status(404).json({ error: 'blocker todo not found' });
       }
 
-      // Validate not same todo
       if (parseInt(id) === parseInt(blocker_id)) {
         return res.status(400).json({ error: 'cannot set todo as its own blocker' });
       }
 
-      // Check if link already exists
-      const existingLinks = await getAll('todo_links', {
+      const existingLinks = await getAll(TODO_LINKS_TABLE, {
         from_todo_id: blocker_id,
         to_todo_id: id,
-        type: 'blocks'
+        type: BLOCKS_TYPE
       });
       if (Array.isArray(existingLinks) && existingLinks.length > 0) {
         return res.status(400).json({ error: 'blocker relationship already exists' });
@@ -123,18 +124,16 @@ function registerBlockerRoutes(app, requireAuth) {
         return res.status(400).json({ error: 'would create a cycle' });
       }
 
-      // Create the link
       const linkRecord = {
         from_todo_id: parseInt(blocker_id),
         to_todo_id: parseInt(id),
-        type: 'blocks',
+        type: BLOCKS_TYPE,
         created_by: req.user.id,
         created_at: new Date().toISOString()
       };
 
-      const link = await insert('todo_links', linkRecord);
+      const link = await insert(TODO_LINKS_TABLE, linkRecord);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'create_blocker_link', parseInt(id), {
         blocker_id: parseInt(blocker_id)
       });
@@ -146,16 +145,14 @@ function registerBlockerRoutes(app, requireAuth) {
     }
   });
 
-  // DELETE /todos/:id/blockers/:blockerId - Remove a blocker
   app.delete('/todos/:id/blockers/:blockerId', requireAuth, async (req, res) => {
     const { id, blockerId } = req.params;
 
     try {
-      // Find and delete the link
-      const links = await getAll('todo_links', {
+      const links = await getAll(TODO_LINKS_TABLE, {
         from_todo_id: blockerId,
         to_todo_id: id,
-        type: 'blocks'
+        type: BLOCKS_TYPE
       });
 
       if (!Array.isArray(links) || links.length === 0) {
@@ -163,9 +160,8 @@ function registerBlockerRoutes(app, requireAuth) {
       }
 
       const link = links[0];
-      await remove('todo_links', link.id);
+      await remove(TODO_LINKS_TABLE, link.id);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'delete_blocker_link', parseInt(id), {
         blocker_id: parseInt(blockerId)
       });
@@ -177,12 +173,11 @@ function registerBlockerRoutes(app, requireAuth) {
     }
   });
 
-  // GET /todos/:id/blockers - Get blocker info for a todo
   app.get('/todos/:id/blockers', requireAuth, async (req, res) => {
     const { id } = req.params;
 
     try {
-      const todo = await getById('todos', id);
+      const todo = await getById(TODOS_TABLE, id);
       if (!todo) {
         return res.status(404).json({ error: 'todo not found' });
       }
@@ -191,7 +186,6 @@ function registerBlockerRoutes(app, requireAuth) {
       const blocking = await getBlocked(id);
       const is_blocked = await isBlocked(id);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'view_todo_blockers', id, {});
 
       res.json({

@@ -1,19 +1,18 @@
-// Assignees module for linking users to todos
 
 const { getAll, getById, insert, remove } = require('./db');
 const { logAction } = require('./logging');
 const { getAllUsers } = require('./auth');
 const { sendNotification, publishToUser } = require('./notifications');
 
-// Helper to get all assignees for a todo
+const TODO_USERS_TABLE = 'todo_users';
+
 async function getAssignees(todoId) {
   try {
-    const assignments = await getAll('todo_users', { todo_id: todoId });
+    const assignments = await getAll(TODO_USERS_TABLE, { todo_id: todoId });
     if (!Array.isArray(assignments)) {
       return [];
     }
 
-    // Map to include user info
     const users = getAllUsers();
     const assignees = assignments.map(assignment => {
       const user = users.find(u => u.id === String(assignment.user_id));
@@ -28,43 +27,36 @@ async function getAssignees(todoId) {
     return assignees;
   } catch (error) {
     console.error('Error fetching assignees:', error);
-    return [];
+    throw error;
   }
 }
 
-// Register assignee routes
 function registerAssigneeRoutes(app, requireAuth) {
-  // POST /todos/:id/users - Assign a user to a todo
   app.post('/todos/:id/users', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { user_id } = req.body;
 
-    // Validate user_id
     if (!user_id) {
       return res.status(400).json({ error: 'user_id is required' });
     }
 
     try {
-      // Check if todo exists
       const todo = await getById('todos', id);
       if (!todo) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      // Check if user exists
       const users = getAllUsers();
       const user = users.find(u => u.id === String(user_id));
       if (!user) {
         return res.status(404).json({ error: 'user not found' });
       }
 
-      // Check if already assigned
-      const assignments = await getAll('todo_users', { todo_id: parseInt(id), user_id: parseInt(user_id) });
+      const assignments = await getAll(TODO_USERS_TABLE, { todo_id: parseInt(id), user_id: parseInt(user_id) });
       if (Array.isArray(assignments) && assignments.length > 0) {
         return res.status(400).json({ error: 'user is already assigned to this todo' });
       }
 
-      // Create assignment
       const now = new Date().toISOString();
       const assignmentRecord = {
         todo_id: parseInt(id),
@@ -73,14 +65,12 @@ function registerAssigneeRoutes(app, requireAuth) {
         assigned_at: now
       };
 
-      const assignment = await insert('todo_users', assignmentRecord);
+      const assignment = await insert(TODO_USERS_TABLE, assignmentRecord);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'assign_user', parseInt(id), {
         assigned_user_id: parseInt(user_id)
       });
 
-      // Send assignment notification
       await sendNotification(
         user.username,
         'You were assigned a todo',
@@ -104,23 +94,19 @@ function registerAssigneeRoutes(app, requireAuth) {
     const { id, userId } = req.params;
 
     try {
-      // Check if todo exists
       const todo = await getById('todos', id);
       if (!todo) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      // Check if assignment exists
-      const assignments = await getAll('todo_users', { todo_id: parseInt(id), user_id: parseInt(userId) });
+      const assignments = await getAll(TODO_USERS_TABLE, { todo_id: parseInt(id), user_id: parseInt(userId) });
       if (!Array.isArray(assignments) || assignments.length === 0) {
         return res.status(404).json({ error: 'assignment not found' });
       }
 
-      // Delete assignment
       const assignment = assignments[0];
-      await remove('todo_users', assignment.id);
+      await remove(TODO_USERS_TABLE, assignment.id);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'unassign_user', parseInt(id), {
         unassigned_user_id: parseInt(userId)
       });
@@ -132,12 +118,10 @@ function registerAssigneeRoutes(app, requireAuth) {
     }
   });
 
-  // GET /todos/:id/users - List users assigned to a todo
   app.get('/todos/:id/users', requireAuth, async (req, res) => {
     const { id } = req.params;
 
     try {
-      // Check if todo exists
       const todo = await getById('todos', id);
       if (!todo) {
         return res.status(404).json({ error: 'todo not found' });
@@ -156,20 +140,17 @@ function registerAssigneeRoutes(app, requireAuth) {
     const { id } = req.params;
 
     try {
-      // Check if user exists
       const users = getAllUsers();
       const user = users.find(u => u.id === String(id));
       if (!user) {
         return res.status(404).json({ error: 'user not found' });
       }
 
-      // Get all assignments for this user
-      const assignments = await getAll('todo_users', { user_id: parseInt(id) });
+      const assignments = await getAll(TODO_USERS_TABLE, { user_id: parseInt(id) });
       if (!Array.isArray(assignments)) {
         return res.json([]);
       }
 
-      // Get all todos and filter to ones assigned to this user
       const allTodos = await getAll('todos');
       const todoList = Array.isArray(allTodos) ? allTodos : [];
 

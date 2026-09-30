@@ -1,33 +1,29 @@
 const express = require('express');
 
-// In-memory storage: { table_name: [records] }
-const storage = {};
-// Track next ID per table: { table_name: nextId }
-const nextIds = {};
-
 function start() {
   const app = express();
   const port = process.env.FAKE_DB_PORT || 4001;
 
+  // In-memory storage: { table_name: [records] }
+  const storage = {};
+  // Track next ID per table: { table_name: nextId }
+  const nextIds = {};
+
   app.use(express.json());
 
-  // Middleware to log requests
   app.use((req, res, next) => {
     console.log(`${req.method} ${req.url}`);
     next();
   });
 
-  // GET /health
   app.get('/health', (req, res) => {
     res.json({ status: 'ok' });
   });
 
-  // GET /tables/:table - returns all records with optional filtering
   app.get('/tables/:table', (req, res) => {
     const table = req.params.table;
     let records = storage[table] || [];
 
-    // Apply query filters
     const filters = req.query;
     Object.keys(filters).forEach(key => {
       records = records.filter(record => {
@@ -38,7 +34,6 @@ function start() {
     res.json(records);
   });
 
-  // GET /tables/:table/:id - returns one record or 404
   app.get('/tables/:table/:id', (req, res) => {
     const table = req.params.table;
     const id = parseInt(req.params.id, 10);
@@ -52,7 +47,6 @@ function start() {
     res.json(record);
   });
 
-  // POST /tables/:table - inserts a new record
   app.post('/tables/:table', (req, res) => {
     const table = req.params.table;
     if (!storage[table]) {
@@ -67,7 +61,6 @@ function start() {
     res.status(201).json(record);
   });
 
-  // PUT /tables/:table/:id - updates a record
   app.put('/tables/:table/:id', (req, res) => {
     const table = req.params.table;
     const id = parseInt(req.params.id, 10);
@@ -83,7 +76,6 @@ function start() {
     res.json(records[recordIndex]);
   });
 
-  // DELETE /tables/:table/:id - deletes a record
   app.delete('/tables/:table/:id', (req, res) => {
     const table = req.params.table;
     const id = parseInt(req.params.id, 10);

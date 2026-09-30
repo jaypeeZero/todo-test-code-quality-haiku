@@ -10,28 +10,32 @@ const { publishEvent, sendNotification, publishToUser } = require('./notificatio
 const { getCurrentProject } = require('./auth');
 const { recalculateInitiativeForTodo } = require('./initiatives');
 
-// Helper to generate request ID
+const STATUS_OPEN = 'open';
+const STATUS_DONE = 'done';
+const STATUS_IN_PROGRESS = 'in_progress';
+const STATUS_TODO = 'todo';
+const STATUS_COMPLETED = 'completed';
+
 function generateRequestId() {
   return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
 }
 
 // Helper to map v1 storage status to v2 response status
 function statusToV2(status) {
-  if (status === 'open') return 'todo';
-  if (status === 'done') return 'completed';
-  if (status === 'in_progress') return 'in_progress';
-  return 'todo';
+  if (status === STATUS_OPEN) return STATUS_TODO;
+  if (status === STATUS_DONE) return STATUS_COMPLETED;
+  if (status === STATUS_IN_PROGRESS) return STATUS_IN_PROGRESS;
+  return STATUS_TODO;
 }
 
 // Helper to map v2 input status to v1 storage status
 function statusFromV2(status) {
-  if (status === 'todo') return 'open';
-  if (status === 'completed') return 'done';
-  if (status === 'in_progress') return 'in_progress';
-  return 'open';
+  if (status === STATUS_TODO) return STATUS_OPEN;
+  if (status === STATUS_COMPLETED) return STATUS_DONE;
+  if (status === STATUS_IN_PROGRESS) return STATUS_IN_PROGRESS;
+  return STATUS_OPEN;
 }
 
-// Helper to get project info for a todo
 async function getProjectInfo(projectId) {
   if (!projectId) {
     return null;
@@ -47,7 +51,6 @@ async function getProjectInfo(projectId) {
   return null;
 }
 
-// Helper to compute is_overdue
 function isOverdue(todo) {
   if (!todo.due_date || todo.status === 'done') {
     return false;
@@ -56,7 +59,6 @@ function isOverdue(todo) {
   return todo.due_date < today;
 }
 
-// Helper to get initiative for a todo
 async function getInitiativeForTodo(todoId) {
   try {
     const allInitiativeTodos = await getAll('initiative_todos');
@@ -73,6 +75,7 @@ async function getInitiativeForTodo(todoId) {
     }
   } catch (error) {
     console.error('Error fetching initiative for todo:', error);
+    throw error;
   }
   return null;
 }
@@ -123,16 +126,13 @@ function wrapV2Response(data, meta = {}) {
 }
 
 function registerV2Routes(app, requireAuth) {
-  // GET /api/v2/todos - List todos with pagination
   app.get('/api/v2/todos', requireAuth, async (req, res) => {
     const { page = 1, page_size = 20, status, priority, project_id, assigned_to, overdue, include_archived, sort, order } = req.query;
 
     try {
-      // Parse pagination params
       let pageNum = parseInt(page) || 1;
       let pageSizeNum = parseInt(page_size) || 20;
 
-      // Validate page_size max
       if (pageSizeNum > 100) {
         pageSizeNum = 100;
       }
@@ -153,21 +153,18 @@ function registerV2Routes(app, requireAuth) {
         return res.json(wrapV2Response([], meta));
       }
 
-      // Filter by archive status
       let filtered = todos;
       if (include_archived !== 'true') {
         // Default: exclude archived
         filtered = todos.filter(todo => !todo.archived);
       }
 
-      // Enrich all todos
       const todosWithEnrichment = [];
       for (const todo of filtered) {
         const enriched = await enrichTodoV2(todo);
         todosWithEnrichment.push(enriched);
       }
 
-      // Filter by status if provided
       if (status) {
         // Convert v2 status to v1 storage status for filtering
         const v1Status = statusFromV2(status);
@@ -183,7 +180,6 @@ function registerV2Routes(app, requireAuth) {
         });
       }
 
-      // Filter by assigned_to if provided
       let result = todosWithEnrichment;
       if (assigned_to) {
         const userId = parseInt(assigned_to);
@@ -192,7 +188,6 @@ function registerV2Routes(app, requireAuth) {
         );
       }
 
-      // Filter by project_id if provided
       if (project_id !== undefined) {
         if (project_id === 'none') {
           result = result.filter(todo => !todo.project_id);
@@ -202,12 +197,10 @@ function registerV2Routes(app, requireAuth) {
         }
       }
 
-      // Filter by priority if provided
       if (priority) {
         result = result.filter(todo => todo.priority === priority);
       }
 
-      // Filter by overdue if provided
       if (overdue === 'true') {
         result = result.filter(todo => todo.is_overdue);
       }
@@ -238,10 +231,8 @@ function registerV2Routes(app, requireAuth) {
         });
       }
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'list_todos', null, {});
 
-      // Paginate
       const total = result.length;
       const total_pages = Math.ceil(total / pageSizeNum);
       const start = (pageNum - 1) * pageSizeNum;
@@ -262,7 +253,6 @@ function registerV2Routes(app, requireAuth) {
     }
   });
 
-  // GET /api/v2/todos/:id - Get a single todo
   app.get('/api/v2/todos/:id', requireAuth, async (req, res) => {
     const { id } = req.params;
 
@@ -272,26 +262,19 @@ function registerV2Routes(app, requireAuth) {
         return res.status(404).json(wrapV2Response(null, { error: 'todo not found' }));
       }
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'view_todo', id, {});
 
-      // Get relations for this todo
       const relations = await getRelations(id);
 
-      // Get blocking info for this todo
       const blocked_by = await getBlockers(id);
       const blocked = await isBlocked(id);
 
-      // Get comments for this todo
       const comments = await getComments(id);
 
-      // Get assignees for this todo
       const assignees = await getAssignees(id);
 
-      // Get project info for this todo
       const project = await getProjectInfo(todo.project_id);
 
-      // Get initiative for this todo
       const initiative = await getInitiativeForTodo(id);
 
       const response = {
@@ -324,11 +307,9 @@ function registerV2Routes(app, requireAuth) {
     }
   });
 
-  // POST /api/v2/todos - Create a todo
   app.post('/api/v2/todos', requireAuth, async (req, res) => {
     const { title, description, status, project_id, due_date, priority } = req.body;
 
-    // Validate title
     if (!title || typeof title !== 'string' || !title.trim()) {
       return res.status(400).json(wrapV2Response(null, { error: 'title is required' }));
     }
@@ -337,7 +318,6 @@ function registerV2Routes(app, requireAuth) {
       return res.status(400).json(wrapV2Response(null, { error: 'title too long (max 200)' }));
     }
 
-    // Validate description
     let trimmedDescription = description;
     if (description !== undefined && description !== null) {
       trimmedDescription = String(description).trim();
@@ -346,14 +326,12 @@ function registerV2Routes(app, requireAuth) {
       }
     }
 
-    // Validate priority
     const validPriorities = ['low', 'medium', 'high', 'urgent'];
     let assignedPriority = priority || 'medium';
     if (!validPriorities.includes(assignedPriority)) {
       return res.status(400).json(wrapV2Response(null, { error: 'invalid priority' }));
     }
 
-    // Validate due_date
     let assignedDueDate = due_date || null;
     if (due_date) {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(due_date)) {
@@ -405,14 +383,12 @@ function registerV2Routes(app, requireAuth) {
     try {
       const todo = await insert('todos', todoRecord);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'create_todo', todo.id, {
         title: trimmedTitle,
         description: trimmedDescription || null,
         project_id: assignedProjectId
       });
 
-      // Publish event
       await publishEvent('todos', {
         type: 'todo.created',
         todo,
@@ -427,7 +403,6 @@ function registerV2Routes(app, requireAuth) {
     }
   });
 
-  // PUT /api/v2/todos/:id - Update a todo
   app.put('/api/v2/todos/:id', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { title, description, status, project_id, due_date, priority } = req.body;
@@ -438,12 +413,10 @@ function registerV2Routes(app, requireAuth) {
         return res.status(404).json(wrapV2Response(null, { error: 'todo not found' }));
       }
 
-      // Check if todo is archived
       if (todo.archived) {
         return res.status(409).json(wrapV2Response(null, { error: 'todo is archived' }));
       }
 
-      // Validate title if provided
       if (title !== undefined) {
         if (!title || typeof title !== 'string' || !title.trim()) {
           return res.status(400).json(wrapV2Response(null, { error: 'title is required' }));
@@ -454,7 +427,6 @@ function registerV2Routes(app, requireAuth) {
         }
       }
 
-      // Validate description if provided
       if (description !== undefined && description !== null) {
         const trimmedDesc = String(description).trim();
         if (trimmedDesc.length > 2000) {
@@ -462,7 +434,6 @@ function registerV2Routes(app, requireAuth) {
         }
       }
 
-      // Validate priority if provided
       if (priority !== undefined) {
         const validPriorities = ['low', 'medium', 'high', 'urgent'];
         if (!validPriorities.includes(priority)) {
@@ -470,7 +441,6 @@ function registerV2Routes(app, requireAuth) {
         }
       }
 
-      // Validate due_date if provided
       if (due_date !== undefined) {
         if (due_date !== null) {
           if (!/^\d{4}-\d{2}-\d{2}$/.test(due_date)) {
@@ -495,7 +465,6 @@ function registerV2Routes(app, requireAuth) {
 
       const changes = {};
 
-      // Track what changed
       if (title !== undefined && title !== todo.title) {
         const trimmedTitle = title.trim();
         changes.title = { from: todo.title, to: trimmedTitle };
@@ -512,7 +481,6 @@ function registerV2Routes(app, requireAuth) {
           changes.status = { from: todo.status, to: newStorageStatus };
           todo.status = newStorageStatus;
 
-          // Update completed_at based on status
           if (newStorageStatus === 'done') {
             todo.completed_at = new Date().toISOString();
           } else if (newStorageStatus === 'open' || newStorageStatus === 'in_progress') {
@@ -521,7 +489,6 @@ function registerV2Routes(app, requireAuth) {
         }
       }
 
-      // Handle project_id change
       if (project_id !== undefined && project_id !== todo.project_id) {
         if (project_id !== null) {
           const project = await getById('projects', project_id);
@@ -533,13 +500,11 @@ function registerV2Routes(app, requireAuth) {
         todo.project_id = project_id;
       }
 
-      // Handle priority change
       if (priority !== undefined && priority !== todo.priority) {
         changes.priority = { from: todo.priority, to: priority };
         todo.priority = priority;
       }
 
-      // Handle due_date change
       if (due_date !== undefined && due_date !== todo.due_date) {
         changes.due_date = { from: todo.due_date, to: due_date };
         todo.due_date = due_date;
@@ -547,7 +512,6 @@ function registerV2Routes(app, requireAuth) {
 
       todo.updated_at = new Date().toISOString();
 
-      // Update in database
       await update('todos', id, todo);
 
       // Recalculate initiative if status changed
@@ -555,17 +519,14 @@ function registerV2Routes(app, requireAuth) {
         await recalculateInitiativeForTodo(parseInt(id));
       }
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'update_todo', id, changes);
 
-      // Publish event
       await publishEvent('todos', {
         type: 'todo.updated',
         todo,
         by: req.user.username
       });
 
-      // Handle completion notifications
       if (changes.status && changes.status.to === 'done') {
         const assignees = await getAssignees(id);
         const databaseName = getDatabaseName();
@@ -605,7 +566,6 @@ function registerV2Routes(app, requireAuth) {
         return res.status(404).json(wrapV2Response(null, { error: 'todo not found' }));
       }
 
-      // Check if todo is archived
       if (todo.archived) {
         return res.status(409).json(wrapV2Response(null, { error: 'todo is archived' }));
       }
@@ -624,7 +584,6 @@ function registerV2Routes(app, requireAuth) {
 
       todo.status = newStorageStatus;
 
-      // Update completed_at based on status
       if (newStorageStatus === 'done') {
         todo.completed_at = new Date().toISOString();
       } else if (newStorageStatus === 'open' || newStorageStatus === 'in_progress') {
@@ -635,13 +594,10 @@ function registerV2Routes(app, requireAuth) {
 
       await update('todos', id, todo);
 
-      // Recalculate initiative
       await recalculateInitiativeForTodo(parseInt(id));
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'update_todo', id, { status: newStorageStatus });
 
-      // Send completion notifications to assignees
       if (newStorageStatus === 'done') {
         const assignees = await getAssignees(id);
         const databaseName = getDatabaseName();
@@ -667,19 +623,16 @@ function registerV2Routes(app, requireAuth) {
     }
   });
 
-  // GET /api/v2/projects/:project_id/todos - List todos for a project with pagination
   app.get('/api/v2/projects/:project_id/todos', requireAuth, async (req, res) => {
     const { project_id } = req.params;
     const { page = 1, page_size = 20, status, priority, assigned_to, overdue, include_archived, sort, order } = req.query;
 
     try {
-      // Verify project exists
       const project = await getById('projects', project_id);
       if (!project) {
         return res.status(404).json(wrapV2Response(null, { error: 'project not found' }));
       }
 
-      // Parse pagination params
       let pageNum = parseInt(page) || 1;
       let pageSizeNum = parseInt(page_size) || 20;
 
@@ -690,7 +643,6 @@ function registerV2Routes(app, requireAuth) {
         pageNum = 1;
       }
 
-      // Fetch all todos
       const todos = await getAll('todos');
 
       if (!Array.isArray(todos)) {
@@ -703,22 +655,18 @@ function registerV2Routes(app, requireAuth) {
         return res.json(wrapV2Response([], meta));
       }
 
-      // Filter by project_id
       let filtered = todos.filter(todo => todo.project_id === parseInt(project_id));
 
-      // Filter by archive status
       if (include_archived !== 'true') {
         filtered = filtered.filter(todo => !todo.archived);
       }
 
-      // Enrich all todos
       const todosWithEnrichment = [];
       for (const todo of filtered) {
         const enriched = await enrichTodoV2(todo);
         todosWithEnrichment.push(enriched);
       }
 
-      // Filter by status if provided
       if (status) {
         const v1Status = statusFromV2(status);
         todosWithEnrichment = todosWithEnrichment.filter(todo => {
@@ -732,7 +680,6 @@ function registerV2Routes(app, requireAuth) {
         });
       }
 
-      // Filter by assigned_to if provided
       let result = todosWithEnrichment;
       if (assigned_to) {
         const userId = parseInt(assigned_to);
@@ -741,12 +688,10 @@ function registerV2Routes(app, requireAuth) {
         );
       }
 
-      // Filter by priority if provided
       if (priority) {
         result = result.filter(todo => todo.priority === priority);
       }
 
-      // Filter by overdue if provided
       if (overdue === 'true') {
         result = result.filter(todo => todo.is_overdue);
       }
@@ -777,10 +722,8 @@ function registerV2Routes(app, requireAuth) {
         });
       }
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'list_project_todos', null, { project_id });
 
-      // Paginate
       const total = result.length;
       const total_pages = Math.ceil(total / pageSizeNum);
       const start = (pageNum - 1) * pageSizeNum;

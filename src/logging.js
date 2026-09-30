@@ -1,8 +1,6 @@
-// Logging helper module
 
 const { insert } = require('./db');
 
-// Helper to log user actions
 async function logAction(userId, username, action, todoId = null, details = null) {
   const timestamp = new Date().toISOString();
   const logRecord = {
@@ -17,6 +15,7 @@ async function logAction(userId, username, action, todoId = null, details = null
     await insert('user_logs', logRecord);
   } catch (error) {
     console.error('Failed to log action:', error);
+    throw error;
   }
 }
 

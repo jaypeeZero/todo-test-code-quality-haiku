@@ -1,8 +1,14 @@
-// Notifications module for sending notifications and publishing events
 
 const NOTIFICATIONS_URL = process.env.NOTIFICATIONS_URL || 'http://localhost:4002';
 const NOTIFICATIONS_ENABLED = process.env.NOTIFICATIONS_ENABLED !== 'false';
 const APP_ENV = process.env.APP_ENV || 'development';
+const SEND_ENDPOINT = '/send';
+const JSON_CONTENT_TYPE = 'application/json';
+const POST_METHOD = 'POST';
+const API_KEY_HEADER = 'x-api-key';
+const CONTENT_TYPE_HEADER = 'Content-Type';
+const PROVIDER_ERROR_STATUS = 500;
+const MAX_ATTEMPTS = 3;
 
 // Determine which API key to use (per-env override or fallback to NOTIFY_API_KEY)
 function getNotifyApiKey() {
@@ -15,7 +21,6 @@ function getNotifyApiKey() {
   return process.env.NOTIFY_API_KEY || 'test-key-123';
 }
 
-// Send a notification with retry logic
 async function sendNotification(to, subject, message) {
   if (!NOTIFICATIONS_ENABLED) {
     return;
@@ -24,20 +29,19 @@ async function sendNotification(to, subject, message) {
   let lastError;
   const apiKey = getNotifyApiKey();
 
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     try {
-      const response = await fetch(`${NOTIFICATIONS_URL}/send`, {
-        method: 'POST',
+      const response = await fetch(`${NOTIFICATIONS_URL}${SEND_ENDPOINT}`, {
+        method: POST_METHOD,
         headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey
+          [CONTENT_TYPE_HEADER]: JSON_CONTENT_TYPE,
+          [API_KEY_HEADER]: apiKey
         },
         body: JSON.stringify({ to, subject, message })
       });
 
-      if (response.status === 500) {
-        lastError = new Error('Provider returned 500');
-        // Retry on 500
+      if (response.status === PROVIDER_ERROR_STATUS) {
+        lastError = new Error(`Provider returned ${PROVIDER_ERROR_STATUS}`);
         continue;
       }
 
@@ -53,11 +57,9 @@ async function sendNotification(to, subject, message) {
     }
   }
 
-  // All retries failed, log and give up
-  console.error('Failed to send notification after 3 attempts:', lastError);
+  console.error('Failed to send notification after ' + MAX_ATTEMPTS + ' attempts:', lastError);
 }
 
-// Publish an event to a topic
 async function publishEvent(topic, payload) {
   if (!NOTIFICATIONS_ENABLED) {
     return;
@@ -66,19 +68,19 @@ async function publishEvent(topic, payload) {
   try {
     const apiKey = getNotifyApiKey();
     await fetch(`${NOTIFICATIONS_URL}/topics/${topic}/publish`, {
-      method: 'POST',
+      method: POST_METHOD,
       headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey
+        [CONTENT_TYPE_HEADER]: JSON_CONTENT_TYPE,
+        [API_KEY_HEADER]: apiKey
       },
       body: JSON.stringify(payload)
     });
   } catch (error) {
     console.error(`Failed to publish event to topic ${topic}:`, error);
+    throw error;
   }
 }
 
-// Publish an event to a user topic
 async function publishToUser(userId, payload) {
   await publishEvent(`user-${userId}`, payload);
 }

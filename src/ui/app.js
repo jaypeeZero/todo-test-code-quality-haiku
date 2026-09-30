@@ -1,23 +1,78 @@
-// State
-let token = localStorage.getItem('token');
-let currentUser = null;
-let currentProjectId = localStorage.getItem('currentProjectId');
-if (currentProjectId === 'null') currentProjectId = null;
-let allTodos = [];
-let allProjects = [];
-let allInitiatives = [];
-let allUsers = [];
-let selectedTodo = null;
-let notificationCount = 0;
-const maxNotifications = 20;
-let notifications = [];
+// Constants (global for reference)
+const CURRENT_PROJECT_ID_KEY = 'currentProjectId';
 
-// Event sources for real-time updates
-let todosEventSource = null;
-let initiativesEventSource = null;
-let userEventSource = null;
+(function() {
+  // State
+  let token = localStorage.getItem('token');
+  let currentUser = null;
+  let currentProjectId = localStorage.getItem(CURRENT_PROJECT_ID_KEY);
+  if (currentProjectId === 'null') currentProjectId = null;
+  let allTodos = [];
+  let allProjects = [];
+  let allInitiatives = [];
+  let allUsers = [];
+  let selectedTodo = null;
+  let notificationCount = 0;
+  const maxNotifications = 20;
+  let notifications = [];
 
-// Initialize
+  let todosEventSource = null;
+  let initiativesEventSource = null;
+  let userEventSource = null;
+
+  const JSON_HEADER = { 'Content-Type': 'application/json' };
+  const NOTIFICATIONS_LIST_ID = 'notifications-list';
+  const HTTP_METHOD_POST = 'POST';
+  const HTTP_METHOD_PUT = 'PUT';
+  const HTTP_METHOD_DELETE = 'DELETE';
+  const AUTH_HEADER_KEY = 'Authorization';
+  const CONTENT_TYPE_HEADER = 'Content-Type';
+  const CONTENT_TYPE_JSON = 'application/json';
+  const DISPLAY_NONE = 'none';
+  const DISPLAY_BLOCK = 'block';
+  const DISPLAY_FLEX = 'flex';
+  const CLASS_ACTIVE = 'active';
+  const LOGIN_SCREEN_ID = 'login-screen';
+  const APP_SCREEN_ID = 'app-screen';
+  const DETAIL_PANEL_ID = 'detail-panel';
+  const LOGIN_ERROR_ID = 'login-error';
+  const REOPEN_BTN_ID = 'reopen-btn';
+  const COMPLETE_BTN_ID = 'complete-btn';
+  const DETAIL_TITLE_ID = 'detail-title';
+  const DETAIL_DESCRIPTION_ID = 'detail-description';
+  const DETAIL_STATUS_ID = 'detail-status';
+  const DETAIL_PRIORITY_ID = 'detail-priority';
+  const DETAIL_DUE_DATE_ID = 'detail-due-date';
+  const INITIATIVE_SECTION_ID = 'initiative-section';
+  const DETAIL_INITIATIVE_ID = 'detail-initiative';
+  const DETAIL_ASSIGNEES_ID = 'detail-assignees';
+  const DETAIL_COMMENTS_ID = 'detail-comments';
+  const DETAIL_RELATIONS_ID = 'detail-relations';
+  const DETAIL_BLOCKERS_ID = 'detail-blockers';
+  const ASSIGNEE_SELECT_ID = 'assignee-select';
+  const NEW_TODO_FORM_ID = 'new-todo-form';
+  const NEW_PROJECT_FORM_ID = 'new-project-form';
+  const NEW_INITIATIVE_FORM_ID = 'new-initiative-form';
+  const PROJECT_SWITCHER_ID = 'project-switcher';
+  const NO_PROJECT_QUERY = '?project_id=none';
+  const NO_PROJECT_VALUE = 'none';
+  const API_ENDPOINT_PROJECTS = '/projects';
+  const API_ENDPOINT_INITIATIVES = '/initiatives';
+  const API_ENDPOINT_TODOS = '/todos';
+  const API_ENDPOINT_USERS = '/users';
+  const API_ENDPOINT_ME = '/me';
+  const STATUS_OPEN = 'open';
+  const STATUS_DONE = 'done';
+  const CSS_CLASS_RELATION_ITEM = 'relation-item';
+  const CSS_CLASS_ASSIGNEE_BADGE = 'assignee-badge';
+  const CSS_CLASS_COMMENT = 'comment';
+  const CSS_CLASS_BLOCKER_ITEM = 'blocker-item';
+  const CSS_CLASS_TAB_BTN = CSS_CLASS_TAB_BTN;
+
+function getAuthHeader() {
+  return { [AUTH_HEADER_KEY]: `Bearer ${token}` };
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   if (token) {
     showApp();
@@ -34,13 +89,13 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
 
   try {
     const response = await fetch('/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: HTTP_METHOD_POST,
+      headers: JSON_HEADER,
       body: JSON.stringify({ username, password })
     });
 
     if (!response.ok) {
-      document.getElementById('login-error').textContent = 'Invalid credentials';
+      document.getElementById(LOGIN_ERROR_ID).textContent = 'Invalid credentials';
       return;
     }
 
@@ -50,23 +105,23 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
     localStorage.setItem('token', token);
     document.getElementById('username').value = '';
     document.getElementById('password').value = '';
-    document.getElementById('login-error').textContent = '';
+    document.getElementById(LOGIN_ERROR_ID).textContent = '';
     showApp();
   } catch (error) {
-    document.getElementById('login-error').textContent = 'Login failed';
+    document.getElementById(LOGIN_ERROR_ID).textContent = 'Login failed';
     console.error('Login error:', error);
   }
 });
 
 function showLogin() {
-  document.getElementById('login-screen').style.display = 'block';
-  document.getElementById('app-screen').style.display = 'none';
+  document.getElementById(LOGIN_SCREEN_ID).style.display = DISPLAY_BLOCK;
+  document.getElementById(APP_SCREEN_ID).style.display = DISPLAY_NONE;
 }
 
 function showApp() {
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('app-screen').style.display = 'flex';
-  document.getElementById('app-screen').style.flexDirection = 'column';
+  document.getElementById(LOGIN_SCREEN_ID).style.display = DISPLAY_NONE;
+  document.getElementById(APP_SCREEN_ID).style.display = DISPLAY_FLEX;
+  document.getElementById(APP_SCREEN_ID).style.flexDirection = 'column';
   loadAppData();
   setupEventListeners();
   setupRealTimeUpdates();
@@ -76,14 +131,15 @@ function showApp() {
 document.getElementById('logout-btn').addEventListener('click', async () => {
   try {
     await fetch('/logout', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` }
+      method: HTTP_METHOD_POST,
+      headers: getAuthHeader()
     });
   } catch (error) {
     console.error('Logout error:', error);
+    throw error;
   }
   localStorage.removeItem('token');
-  localStorage.removeItem('currentProjectId');
+  localStorage.removeItem(CURRENT_PROJECT_ID_KEY);
   token = null;
   currentUser = null;
   closeDetailPanel();
@@ -94,94 +150,85 @@ document.getElementById('logout-btn').addEventListener('click', async () => {
   showLogin();
 });
 
-// Load app data
 async function loadAppData() {
   try {
-    // Get current user
-    const meResponse = await fetch('/me', {
-      headers: { 'Authorization': `Bearer ${token}` }
+    const meResponse = await fetch(API_ENDPOINT_ME, {
+      headers: getAuthHeader()
     });
     const meData = await meResponse.json();
     currentUser = meData;
     currentProjectId = meData.current_project_id;
     document.getElementById('username-display').textContent = meData.username;
 
-    // Load projects
-    const projectsResponse = await fetch('/projects', {
-      headers: { 'Authorization': `Bearer ${token}` }
+    const projectsResponse = await fetch(API_ENDPOINT_PROJECTS, {
+      headers: getAuthHeader()
     });
     allProjects = await projectsResponse.json();
     populateProjectSwitcher();
     populateProjectMultiSelect();
     populateProjectSelect();
 
-    // Load users
-    const usersResponse = await fetch('/users', {
-      headers: { 'Authorization': `Bearer ${token}` }
+    const usersResponse = await fetch(API_ENDPOINT_USERS, {
+      headers: getAuthHeader()
     });
     allUsers = await usersResponse.json();
     populateAssigneeSelect();
 
-    // Load todos
-    const todosParams = currentProjectId ? `?project_id=${currentProjectId}` : '?project_id=none';
-    const todosResponse = await fetch(`/todos${todosParams}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+    const todosParams = currentProjectId ? `?project_id=${currentProjectId}` : NO_PROJECT_QUERY;
+    const todosResponse = await fetch(`${API_ENDPOINT_TODOS}${todosParams}`, {
+      headers: getAuthHeader()
     });
     allTodos = await todosResponse.json();
     renderTodosList();
 
-    // Load initiatives
-    const initiativesResponse = await fetch('/initiatives', {
-      headers: { 'Authorization': `Bearer ${token}` }
+    const initiativesResponse = await fetch(API_ENDPOINT_INITIATIVES, {
+      headers: getAuthHeader()
     });
     allInitiatives = await initiativesResponse.json();
     renderInitiativesList();
 
-    // Render projects
     renderProjectsList();
   } catch (error) {
     console.error('Failed to load app data:', error);
+    throw error;
   }
 }
 
-// Setup event listeners
 function setupEventListeners() {
-  // Tab navigation
-  document.querySelectorAll('.tab-btn').forEach(btn => {
+  document.querySelectorAll(CSS_CLASS_TAB_BTN).forEach(btn => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById(`${btn.dataset.tab}-tab`).classList.add('active');
+      document.querySelectorAll(CSS_CLASS_TAB_BTN).forEach(b => b.classList.remove(CLASS_ACTIVE));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove(CLASS_ACTIVE));
+      btn.classList.add(CLASS_ACTIVE);
+      document.getElementById(`${btn.dataset.tab}-tab`).classList.add(CLASS_ACTIVE);
     });
   });
 
-  // Project switcher
-  document.getElementById('project-switcher').addEventListener('change', async (e) => {
-    currentProjectId = e.target.value === 'none' ? null : parseInt(e.target.value);
-    localStorage.setItem('currentProjectId', currentProjectId);
+  document.getElementById(PROJECT_SWITCHER_ID).addEventListener('change', async (e) => {
+    currentProjectId = e.target.value === NO_PROJECT_VALUE ? null : parseInt(e.target.value);
+    localStorage.setItem(CURRENT_PROJECT_ID_KEY, currentProjectId);
     try {
       await fetch('/me/current-project', {
-        method: 'PUT',
+        method: HTTP_METHOD_PUT,
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          [AUTH_HEADER_KEY]: `Bearer ${token}`,
+          [CONTENT_TYPE_HEADER]: CONTENT_TYPE_JSON
         },
         body: JSON.stringify({ project_id: currentProjectId })
       });
-      const todosParams = currentProjectId ? `?project_id=${currentProjectId}` : '?project_id=none';
-      const response = await fetch(`/todos${todosParams}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const todosParams = currentProjectId ? `?project_id=${currentProjectId}` : NO_PROJECT_QUERY;
+      const response = await fetch(`${API_ENDPOINT_TODOS}${todosParams}`, {
+        headers: getAuthHeader()
       });
       allTodos = await response.json();
       renderTodosList();
     } catch (error) {
       console.error('Failed to switch project:', error);
+      throw error;
     }
   });
 
-  // New todo form
-  document.getElementById('new-todo-form').addEventListener('submit', async (e) => {
+  document.getElementById(NEW_TODO_FORM_ID).addEventListener('submit', async (e) => {
     e.preventDefault();
     const title = document.getElementById('todo-title').value;
     const description = document.getElementById('todo-description').value;
@@ -189,11 +236,11 @@ function setupEventListeners() {
     const dueDate = document.getElementById('todo-due-date').value;
 
     try {
-      const response = await fetch('/todos', {
-        method: 'POST',
+      const response = await fetch(API_ENDPOINT_TODOS, {
+        method: HTTP_METHOD_POST,
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          [AUTH_HEADER_KEY]: `Bearer ${token}`,
+          [CONTENT_TYPE_HEADER]: CONTENT_TYPE_JSON
         },
         body: JSON.stringify({
           title,
@@ -207,25 +254,25 @@ function setupEventListeners() {
         const newTodo = await response.json();
         allTodos.push(newTodo);
         renderTodosList();
-        document.getElementById('new-todo-form').reset();
+        document.getElementById(NEW_TODO_FORM_ID).reset();
       }
     } catch (error) {
       console.error('Failed to create todo:', error);
+      throw error;
     }
   });
 
-  // New project form
-  document.getElementById('new-project-form').addEventListener('submit', async (e) => {
+  document.getElementById(NEW_PROJECT_FORM_ID).addEventListener('submit', async (e) => {
     e.preventDefault();
     const name = document.getElementById('project-name').value;
     const description = document.getElementById('project-description').value;
 
     try {
-      const response = await fetch('/projects', {
-        method: 'POST',
+      const response = await fetch(API_ENDPOINT_PROJECTS, {
+        method: HTTP_METHOD_POST,
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          [AUTH_HEADER_KEY]: `Bearer ${token}`,
+          [CONTENT_TYPE_HEADER]: CONTENT_TYPE_JSON
         },
         body: JSON.stringify({
           name,
@@ -239,15 +286,15 @@ function setupEventListeners() {
         populateProjectSwitcher();
         populateProjectMultiSelect();
         renderProjectsList();
-        document.getElementById('new-project-form').reset();
+        document.getElementById(NEW_PROJECT_FORM_ID).reset();
       }
     } catch (error) {
       console.error('Failed to create project:', error);
+      throw error;
     }
   });
 
-  // New initiative form
-  document.getElementById('new-initiative-form').addEventListener('submit', async (e) => {
+  document.getElementById(NEW_INITIATIVE_FORM_ID).addEventListener('submit', async (e) => {
     e.preventDefault();
     const name = document.getElementById('initiative-name').value;
     const description = document.getElementById('initiative-description').value;
@@ -261,11 +308,11 @@ function setupEventListeners() {
     }
 
     try {
-      const response = await fetch('/initiatives', {
-        method: 'POST',
+      const response = await fetch(API_ENDPOINT_INITIATIVES, {
+        method: HTTP_METHOD_POST,
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          [AUTH_HEADER_KEY]: `Bearer ${token}`,
+          [CONTENT_TYPE_HEADER]: CONTENT_TYPE_JSON
         },
         body: JSON.stringify({
           name,
@@ -278,33 +325,31 @@ function setupEventListeners() {
         const newInitiative = await response.json();
         allInitiatives.push(newInitiative);
         renderInitiativesList();
-        document.getElementById('new-initiative-form').reset();
+        document.getElementById(NEW_INITIATIVE_FORM_ID).reset();
         document.querySelectorAll('#project-multi-select .multi-select-item').forEach(item => {
           item.classList.remove('selected');
         });
       }
     } catch (error) {
       console.error('Failed to create initiative:', error);
+      throw error;
     }
   });
 
-  // Detail panel close
   document.getElementById('close-detail-btn').addEventListener('click', closeDetailPanel);
 
-  // Notifications button
   document.getElementById('notifications-btn').addEventListener('click', toggleNotificationsPanel);
 }
 
 function toggleNotificationsPanel() {
-  const list = document.getElementById('notifications-list');
-  list.style.display = list.style.display === 'none' ? 'block' : 'none';
+  const list = document.getElementById(NOTIFICATIONS_LIST_ID);
+  list.style.display = list.style.display === DISPLAY_NONE ? 'block' : 'none';
 }
 
 function closeNotificationsPanel() {
-  document.getElementById('notifications-list').style.display = 'none';
+  document.getElementById(NOTIFICATIONS_LIST_ID).style.display = DISPLAY_NONE;
 }
 
-// Populate dropdowns
 function populateProjectSwitcher() {
   const select = document.getElementById('project-switcher');
   const currentValue = select.value;
@@ -338,7 +383,7 @@ function populateProjectMultiSelect() {
 }
 
 function populateAssigneeSelect() {
-  const select = document.getElementById('assignee-select');
+  const select = document.getElementById(ASSIGNEE_SELECT_ID);
   select.innerHTML = '<option value="">Select user to assign...</option>';
   allUsers.forEach(user => {
     const option = document.createElement('option');
@@ -352,7 +397,6 @@ function populateProjectSelect() {
   // Not used in MVP but available for future enhancements
 }
 
-// Render todos list
 function renderTodosList() {
   const container = document.getElementById('todos-container');
   container.innerHTML = '';
@@ -414,7 +458,6 @@ function renderTodosList() {
   });
 }
 
-// Render projects list
 function renderProjectsList() {
   const container = document.getElementById('projects-container');
   container.innerHTML = '';
@@ -431,7 +474,6 @@ function renderProjectsList() {
   });
 }
 
-// Render initiatives list
 function renderInitiativesList() {
   const container = document.getElementById('initiatives-container');
   container.innerHTML = '';
@@ -462,12 +504,12 @@ async function completeTodo(todoId) {
     if (!todo) return;
 
     const response = await fetch(`/todos/${todoId}`, {
-      method: 'PUT',
+      method: HTTP_METHOD_PUT,
       headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
+        [AUTH_HEADER_KEY]: `Bearer ${token}`,
+        [CONTENT_TYPE_HEADER]: CONTENT_TYPE_JSON
       },
-      body: JSON.stringify({ status: 'done' })
+      body: JSON.stringify({ status: STATUS_DONE })
     });
 
     if (response.ok) {
@@ -488,12 +530,12 @@ async function completeTodo(todoId) {
 async function reopenTodo(todoId) {
   try {
     const response = await fetch(`/todos/${todoId}`, {
-      method: 'PUT',
+      method: HTTP_METHOD_PUT,
       headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json'
+        [AUTH_HEADER_KEY]: `Bearer ${token}`,
+        [CONTENT_TYPE_HEADER]: CONTENT_TYPE_JSON
       },
-      body: JSON.stringify({ status: 'open' })
+      body: JSON.stringify({ status: STATUS_OPEN })
     });
 
     if (response.ok) {
@@ -508,14 +550,15 @@ async function reopenTodo(todoId) {
     }
   } catch (error) {
     console.error('Failed to reopen todo:', error);
+    throw error;
   }
 }
 
 async function archiveTodo(todoId) {
   try {
     const response = await fetch(`/todos/${todoId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
+      method: HTTP_METHOD_DELETE,
+      headers: getAuthHeader()
     });
 
     if (response.ok) {
@@ -525,17 +568,17 @@ async function archiveTodo(todoId) {
     }
   } catch (error) {
     console.error('Failed to archive todo:', error);
+    throw error;
   }
 }
 
-// Project actions
 async function deleteProject(projectId) {
   if (!confirm('Delete this project?')) return;
 
   try {
     const response = await fetch(`/projects/${projectId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
+      method: HTTP_METHOD_DELETE,
+      headers: getAuthHeader()
     });
 
     if (response.ok) {
@@ -546,17 +589,17 @@ async function deleteProject(projectId) {
     }
   } catch (error) {
     console.error('Failed to delete project:', error);
+    throw error;
   }
 }
 
-// Initiative actions
 async function deleteInitiative(initiativeId) {
   if (!confirm('Delete this initiative?')) return;
 
   try {
     const response = await fetch(`/initiatives/${initiativeId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
+      method: HTTP_METHOD_DELETE,
+      headers: getAuthHeader()
     });
 
     if (response.ok) {
@@ -565,21 +608,21 @@ async function deleteInitiative(initiativeId) {
     }
   } catch (error) {
     console.error('Failed to delete initiative:', error);
+    throw error;
   }
 }
 
-// Detail panel
 async function openTodoDetail(todoId) {
   try {
     const response = await fetch(`/todos/${todoId}`, {
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: getAuthHeader()
     });
 
     if (response.ok) {
       selectedTodo = await response.json();
       renderDetailPanel();
-      document.getElementById('detail-panel').style.display = 'block';
-      document.getElementById('detail-panel').classList.add('open');
+      document.getElementById(DETAIL_PANEL_ID).style.display = DISPLAY_BLOCK;
+      document.getElementById(DETAIL_PANEL_ID).classList.add('open');
     }
   } catch (error) {
     console.error('Failed to load todo detail:', error);
@@ -587,43 +630,40 @@ async function openTodoDetail(todoId) {
 }
 
 function closeDetailPanel() {
-  document.getElementById('detail-panel').style.display = 'none';
+  document.getElementById(DETAIL_PANEL_ID).style.display = DISPLAY_NONE;
   selectedTodo = null;
 }
 
 function renderDetailPanel() {
   if (!selectedTodo) return;
 
-  document.getElementById('detail-title').textContent = escapeHtml(selectedTodo.title);
-  document.getElementById('detail-description').textContent = selectedTodo.description || '(no description)';
-  document.getElementById('detail-status').value = selectedTodo.status === 'open' ? 'open' : 'done';
-  document.getElementById('detail-priority').value = selectedTodo.priority;
-  document.getElementById('detail-due-date').value = selectedTodo.due_date || '';
+  document.getElementById(DETAIL_TITLE_ID).textContent = escapeHtml(selectedTodo.title);
+  document.getElementById(DETAIL_DESCRIPTION_ID).textContent = selectedTodo.description || '(no description)';
+  document.getElementById(DETAIL_STATUS_ID).value = selectedTodo.status === STATUS_OPEN ? STATUS_OPEN : STATUS_DONE;
+  document.getElementById(DETAIL_PRIORITY_ID).value = selectedTodo.priority;
+  document.getElementById(DETAIL_DUE_DATE_ID).value = selectedTodo.due_date || '';
 
-  // Render initiative if present
   if (selectedTodo.initiative) {
-    document.getElementById('initiative-section').style.display = 'block';
-    document.getElementById('detail-initiative').textContent = escapeHtml(selectedTodo.initiative.name);
+    document.getElementById(INITIATIVE_SECTION_ID).style.display = DISPLAY_BLOCK;
+    document.getElementById(DETAIL_INITIATIVE_ID).textContent = escapeHtml(selectedTodo.initiative.name);
   } else {
-    document.getElementById('initiative-section').style.display = 'none';
+    document.getElementById(INITIATIVE_SECTION_ID).style.display = DISPLAY_NONE;
   }
 
-  // Update button visibility
-  if (selectedTodo.status === 'done') {
-    document.getElementById('complete-btn').style.display = 'none';
-    document.getElementById('reopen-btn').style.display = 'block';
+  if (selectedTodo.status === STATUS_DONE) {
+    document.getElementById(COMPLETE_BTN_ID).style.display = DISPLAY_NONE;
+    document.getElementById(REOPEN_BTN_ID).style.display = DISPLAY_BLOCK;
   } else {
-    document.getElementById('complete-btn').style.display = 'block';
-    document.getElementById('reopen-btn').style.display = 'none';
+    document.getElementById(COMPLETE_BTN_ID).style.display = DISPLAY_BLOCK;
+    document.getElementById(REOPEN_BTN_ID).style.display = DISPLAY_NONE;
   }
 
-  // Render assignees
-  const assigneesContainer = document.getElementById('detail-assignees');
+  const assigneesContainer = document.getElementById(DETAIL_ASSIGNEES_ID);
   assigneesContainer.innerHTML = '';
   if (selectedTodo.assignees && selectedTodo.assignees.length > 0) {
     selectedTodo.assignees.forEach(assignee => {
       const badge = document.createElement('div');
-      badge.className = 'assignee-badge';
+      badge.className = CSS_CLASS_ASSIGNEE_BADGE;
       badge.innerHTML = `
         ${escapeHtml(assignee.username)}
         <button class="remove-assignee" onclick="removeAssignee(${assignee.id})">×</button>
@@ -632,13 +672,12 @@ function renderDetailPanel() {
     });
   }
 
-  // Render comments
-  const commentsContainer = document.getElementById('detail-comments');
+  const commentsContainer = document.getElementById(DETAIL_COMMENTS_ID);
   commentsContainer.innerHTML = '';
   if (selectedTodo.comments && selectedTodo.comments.length > 0) {
     selectedTodo.comments.forEach(comment => {
       const commentDiv = document.createElement('div');
-      commentDiv.className = 'comment';
+      commentDiv.className = CSS_CLASS_COMMENT;
       commentDiv.innerHTML = `
         <div class="comment-author">${escapeHtml(comment.username)}</div>
         <div class="comment-body">${escapeHtml(comment.body)}</div>
@@ -647,38 +686,36 @@ function renderDetailPanel() {
     });
   }
 
-  // Render relations
-  const relationsContainer = document.getElementById('detail-relations');
+  const relationsContainer = document.getElementById(DETAIL_RELATIONS_ID);
   relationsContainer.innerHTML = '';
   if (selectedTodo.relations) {
     const { parent, children, siblings } = selectedTodo.relations;
     if (parent) {
       const item = document.createElement('div');
-      item.className = 'relation-item';
+      item.className = CSS_CLASS_RELATION_ITEM;
       item.innerHTML = `<span class="relation-label">Parent:</span> ${escapeHtml(parent.title)} (#${parent.id})`;
       relationsContainer.appendChild(item);
     }
     if (children && children.length > 0) {
       const item = document.createElement('div');
-      item.className = 'relation-item';
+      item.className = CSS_CLASS_RELATION_ITEM;
       item.innerHTML = `<span class="relation-label">Children:</span> ${children.map(c => `${escapeHtml(c.title)} (#${c.id})`).join(', ')}`;
       relationsContainer.appendChild(item);
     }
     if (siblings && siblings.length > 0) {
       const item = document.createElement('div');
-      item.className = 'relation-item';
+      item.className = CSS_CLASS_RELATION_ITEM;
       item.innerHTML = `<span class="relation-label">Siblings:</span> ${siblings.map(s => `${escapeHtml(s.title)} (#${s.id})`).join(', ')}`;
       relationsContainer.appendChild(item);
     }
   }
 
-  // Render blockers
-  const blockersContainer = document.getElementById('detail-blockers');
+  const blockersContainer = document.getElementById(DETAIL_BLOCKERS_ID);
   blockersContainer.innerHTML = '';
   if (selectedTodo.blocked_by && selectedTodo.blocked_by.length > 0) {
     selectedTodo.blocked_by.forEach(blocker => {
       const item = document.createElement('div');
-      item.className = 'blocker-item';
+      item.className = CSS_CLASS_BLOCKER_ITEM;
       item.innerHTML = `
         <span>${escapeHtml(blocker.title)} (#${blocker.id})</span>
         <button class="remove-blocker" onclick="removeBlocker(${blocker.id})">×</button>
@@ -687,19 +724,17 @@ function renderDetailPanel() {
     });
   }
 
-  // Setup event listeners for detail panel
   setupDetailPanelListeners();
 }
 
 function setupDetailPanelListeners() {
-  // Status change
-  document.getElementById('detail-status').addEventListener('change', async (e) => {
+  document.getElementById(DETAIL_STATUS_ID).addEventListener('change', async (e) => {
     try {
       const response = await fetch(`/todos/${selectedTodo.id}`, {
-        method: 'PUT',
+        method: HTTP_METHOD_PUT,
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          [AUTH_HEADER_KEY]: `Bearer ${token}`,
+          [CONTENT_TYPE_HEADER]: CONTENT_TYPE_JSON
         },
         body: JSON.stringify({ status: e.target.value })
       });
@@ -714,17 +749,17 @@ function setupDetailPanelListeners() {
       }
     } catch (error) {
       console.error('Failed to update status:', error);
+      throw error;
     }
   });
 
-  // Priority change
   document.getElementById('detail-priority').addEventListener('change', async (e) => {
     try {
       const response = await fetch(`/todos/${selectedTodo.id}`, {
-        method: 'PUT',
+        method: HTTP_METHOD_PUT,
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          [AUTH_HEADER_KEY]: `Bearer ${token}`,
+          [CONTENT_TYPE_HEADER]: CONTENT_TYPE_JSON
         },
         body: JSON.stringify({ priority: e.target.value })
       });
@@ -739,17 +774,17 @@ function setupDetailPanelListeners() {
       }
     } catch (error) {
       console.error('Failed to update priority:', error);
+      throw error;
     }
   });
 
-  // Due date change
   document.getElementById('detail-due-date').addEventListener('change', async (e) => {
     try {
       const response = await fetch(`/todos/${selectedTodo.id}`, {
-        method: 'PUT',
+        method: HTTP_METHOD_PUT,
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          [AUTH_HEADER_KEY]: `Bearer ${token}`,
+          [CONTENT_TYPE_HEADER]: CONTENT_TYPE_JSON
         },
         body: JSON.stringify({ due_date: e.target.value || null })
       });
@@ -764,107 +799,102 @@ function setupDetailPanelListeners() {
       }
     } catch (error) {
       console.error('Failed to update due date:', error);
+      throw error;
     }
   });
 
-  // Add assignee
   document.getElementById('add-assignee-btn').addEventListener('click', async () => {
-    const userId = document.getElementById('assignee-select').value;
+    const userId = document.getElementById(ASSIGNEE_SELECT_ID).value;
     if (!userId) return;
 
     try {
       const response = await fetch(`/todos/${selectedTodo.id}/users`, {
-        method: 'POST',
+        method: HTTP_METHOD_POST,
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          [AUTH_HEADER_KEY]: `Bearer ${token}`,
+          [CONTENT_TYPE_HEADER]: CONTENT_TYPE_JSON
         },
         body: JSON.stringify({ user_id: parseInt(userId) })
       });
 
       if (response.ok) {
-        document.getElementById('assignee-select').value = '';
-        // Reload the detail panel
+        document.getElementById(ASSIGNEE_SELECT_ID).value = '';
         const detailResponse = await fetch(`/todos/${selectedTodo.id}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: getAuthHeader()
         });
         selectedTodo = await detailResponse.json();
         renderDetailPanel();
       }
     } catch (error) {
       console.error('Failed to add assignee:', error);
+      throw error;
     }
   });
 
-  // Add comment
   document.getElementById('add-comment-btn').addEventListener('click', async () => {
     const body = document.getElementById('comment-body').value;
     if (!body) return;
 
     try {
       const response = await fetch(`/todos/${selectedTodo.id}/comments`, {
-        method: 'POST',
+        method: HTTP_METHOD_POST,
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          [AUTH_HEADER_KEY]: `Bearer ${token}`,
+          [CONTENT_TYPE_HEADER]: CONTENT_TYPE_JSON
         },
         body: JSON.stringify({ body })
       });
 
       if (response.ok) {
         document.getElementById('comment-body').value = '';
-        // Reload the detail panel
         const detailResponse = await fetch(`/todos/${selectedTodo.id}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: getAuthHeader()
         });
         selectedTodo = await detailResponse.json();
         renderDetailPanel();
       }
     } catch (error) {
       console.error('Failed to add comment:', error);
+      throw error;
     }
   });
 
-  // Add blocker
   document.getElementById('add-blocker-btn').addEventListener('click', async () => {
     const blockerTodoId = parseInt(document.getElementById('blocker-todo-id').value);
     if (!blockerTodoId) return;
 
     try {
       const response = await fetch(`/todos/${selectedTodo.id}/blockers`, {
-        method: 'POST',
+        method: HTTP_METHOD_POST,
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          [AUTH_HEADER_KEY]: `Bearer ${token}`,
+          [CONTENT_TYPE_HEADER]: CONTENT_TYPE_JSON
         },
         body: JSON.stringify({ blocker_id: blockerTodoId })
       });
 
       if (response.ok) {
         document.getElementById('blocker-todo-id').value = '';
-        // Reload the detail panel
         const detailResponse = await fetch(`/todos/${selectedTodo.id}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: getAuthHeader()
         });
         selectedTodo = await detailResponse.json();
         renderDetailPanel();
       }
     } catch (error) {
       console.error('Failed to add blocker:', error);
+      throw error;
     }
   });
 
-  // Complete button
-  document.getElementById('complete-btn').addEventListener('click', async () => {
+  document.getElementById(COMPLETE_BTN_ID).addEventListener('click', async () => {
     await completeTodo(selectedTodo.id);
   });
 
-  // Reopen button
-  document.getElementById('reopen-btn').addEventListener('click', async () => {
+  document.getElementById(REOPEN_BTN_ID).addEventListener('click', async () => {
     await reopenTodo(selectedTodo.id);
   });
 
-  // Archive button
   document.getElementById('archive-btn').addEventListener('click', async () => {
     await archiveTodo(selectedTodo.id);
   });
@@ -873,60 +903,57 @@ function setupDetailPanelListeners() {
 async function removeAssignee(userId) {
   try {
     const response = await fetch(`/todos/${selectedTodo.id}/users/${userId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
+      method: HTTP_METHOD_DELETE,
+      headers: getAuthHeader()
     });
 
     if (response.ok) {
-      // Reload the detail panel
       const detailResponse = await fetch(`/todos/${selectedTodo.id}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: getAuthHeader()
       });
       selectedTodo = await detailResponse.json();
       renderDetailPanel();
     }
   } catch (error) {
     console.error('Failed to remove assignee:', error);
+    throw error;
   }
 }
 
 async function removeBlocker(blockerTodoId) {
   try {
     const response = await fetch(`/todos/${selectedTodo.id}/blockers/${blockerTodoId}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
+      method: HTTP_METHOD_DELETE,
+      headers: getAuthHeader()
     });
 
     if (response.ok) {
-      // Reload the detail panel
       const detailResponse = await fetch(`/todos/${selectedTodo.id}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: getAuthHeader()
       });
       selectedTodo = await detailResponse.json();
       renderDetailPanel();
     }
   } catch (error) {
     console.error('Failed to remove blocker:', error);
+    throw error;
   }
 }
 
-// Real-time updates
 function setupRealTimeUpdates() {
-  // Todos updates
   todosEventSource = new EventSource('http://localhost:4002/topics/todos/stream');
   todosEventSource.addEventListener('message', async (e) => {
     try {
       const data = JSON.parse(e.data);
-      // Reload todos list on any change
-      const todosParams = currentProjectId ? `?project_id=${currentProjectId}` : '?project_id=none';
+      const todosParams = currentProjectId ? `?project_id=${currentProjectId}` : NO_PROJECT_QUERY;
       const response = await fetch(`/todos${todosParams}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+        headers: getAuthHeader()
       });
       allTodos = await response.json();
       renderTodosList();
       if (selectedTodo) {
         const detailResponse = await fetch(`/todos/${selectedTodo.id}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: getAuthHeader()
         });
         if (detailResponse.ok) {
           selectedTodo = await detailResponse.json();
@@ -935,26 +962,26 @@ function setupRealTimeUpdates() {
       }
     } catch (error) {
       console.error('Error processing todos event:', error);
+      throw error;
     }
   });
 
-  // Initiatives updates
   initiativesEventSource = new EventSource('http://localhost:4002/topics/initiatives/stream');
   initiativesEventSource.addEventListener('message', async (e) => {
     try {
       const data = JSON.parse(e.data);
       // Reload initiatives on progress/completed events
-      const response = await fetch('/initiatives', {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const response = await fetch(API_ENDPOINT_INITIATIVES, {
+        headers: getAuthHeader()
       });
       allInitiatives = await response.json();
       renderInitiativesList();
     } catch (error) {
       console.error('Error processing initiatives event:', error);
+      throw error;
     }
   });
 
-  // User notifications
   userEventSource = new EventSource(`http://localhost:4002/topics/user-${currentUser.id}/stream`);
   userEventSource.addEventListener('message', (e) => {
     try {
@@ -997,3 +1024,5 @@ function escapeHtml(text) {
   };
   return text.replace(/[&<>"']/g, m => map[m]);
 }
+
+})();

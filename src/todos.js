@@ -10,23 +10,26 @@ const { publishEvent, sendNotification, publishToUser } = require('./notificatio
 const { getCurrentProject } = require('./auth');
 const { recalculateInitiativeForTodo } = require('./initiatives');
 
-// Helper to get project info for a todo
+const PROJECTS_TABLE = 'projects';
+const INITIATIVE_TODOS_TABLE = 'initiative_todos';
+const INITIATIVES_TABLE = 'initiatives';
+
 async function getProjectInfo(projectId) {
   if (!projectId) {
     return null;
   }
   try {
-    const project = await getById('projects', projectId);
+    const project = await getById(PROJECTS_TABLE, projectId);
     if (project) {
       return { id: project.id, name: project.name };
     }
   } catch (error) {
     console.error('Error fetching project:', error);
+    throw error;
   }
   return null;
 }
 
-// Helper to compute is_overdue
 function isOverdue(todo) {
   if (!todo.due_date || todo.status === 'done') {
     return false;
@@ -35,10 +38,9 @@ function isOverdue(todo) {
   return todo.due_date < today;
 }
 
-// Helper to get initiative for a todo
 async function getInitiativeForTodo(todoId) {
   try {
-    const allInitiativeTodos = await getAll('initiative_todos');
+    const allInitiativeTodos = await getAll(INITIATIVE_TODOS_TABLE);
     if (!Array.isArray(allInitiativeTodos)) {
       return null;
     }
@@ -46,19 +48,18 @@ async function getInitiativeForTodo(todoId) {
     if (!initiativeTodo) {
       return null;
     }
-    const initiative = await getById('initiatives', initiativeTodo.initiative_id);
+    const initiative = await getById(INITIATIVES_TABLE, initiativeTodo.initiative_id);
     if (initiative) {
       return { id: initiative.id, name: initiative.name };
     }
   } catch (error) {
     console.error('Error fetching initiative for todo:', error);
+    throw error;
   }
   return null;
 }
 
-// Register todo routes
 function registerTodoRoutes(app, requireAuth) {
-  // POST /todos - Create a todo
   app.post('/todos', requireAuth, async (req, res) => {
     const { title, description, status, project_id, due_date, priority } = req.body;
 
@@ -71,7 +72,6 @@ function registerTodoRoutes(app, requireAuth) {
       return res.status(400).json({ error: 'title too long (max 200)' });
     }
 
-    // Validate description
     let trimmedDescription = description;
     if (description !== undefined && description !== null) {
       trimmedDescription = String(description).trim();
@@ -80,21 +80,17 @@ function registerTodoRoutes(app, requireAuth) {
       }
     }
 
-    // Validate priority
     const validPriorities = ['low', 'medium', 'high', 'urgent'];
     let assignedPriority = priority || 'medium';
     if (!validPriorities.includes(assignedPriority)) {
       return res.status(400).json({ error: 'invalid priority' });
     }
 
-    // Validate due_date
     let assignedDueDate = due_date || null;
     if (due_date) {
-      // Check if it's a valid ISO date string (YYYY-MM-DD)
       if (!/^\d{4}-\d{2}-\d{2}$/.test(due_date)) {
         return res.status(400).json({ error: 'invalid due_date format' });
       }
-      // Verify it's a valid date
       const dateObj = new Date(due_date + 'T00:00:00Z');
       if (isNaN(dateObj.getTime())) {
         return res.status(400).json({ error: 'invalid due_date' });
@@ -102,15 +98,13 @@ function registerTodoRoutes(app, requireAuth) {
       assignedDueDate = due_date;
     }
 
-    // Create todo record
     const now = new Date().toISOString();
 
     // Determine project_id: explicit > current project > null
     let assignedProjectId = null;
     if (project_id !== undefined && project_id !== null) {
-      // Verify project exists
       try {
-        const project = await getById('projects', project_id);
+        const project = await getById(PROJECTS_TABLE, project_id);
         if (!project) {
           return res.status(404).json({ error: 'project not found' });
         }
@@ -119,7 +113,6 @@ function registerTodoRoutes(app, requireAuth) {
       }
       assignedProjectId = project_id;
     } else {
-      // Try to use user's current project
       const currentProject = getCurrentProject(req.user.id);
       if (currentProject) {
         assignedProjectId = currentProject;
@@ -142,14 +135,12 @@ function registerTodoRoutes(app, requireAuth) {
     try {
       const todo = await insert('todos', todoRecord);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'create_todo', todo.id, {
         title: trimmedTitle,
         description: trimmedDescription || null,
         project_id: assignedProjectId
       });
 
-      // Publish event
       await publishEvent('todos', {
         type: 'todo.created',
         todo,
@@ -163,7 +154,6 @@ function registerTodoRoutes(app, requireAuth) {
     }
   });
 
-  // GET /todos/archived - List only archived todos
   app.get('/todos/archived', requireAuth, async (req, res) => {
     try {
       const todos = await getAll('todos');
@@ -172,10 +162,8 @@ function registerTodoRoutes(app, requireAuth) {
         return res.json([]);
       }
 
-      // Filter to only archived todos
       const archivedTodos = todos.filter(todo => todo.archived === true);
 
-      // Add is_blocked, comment_count, assignees, and project to each todo
       const todosWithBlocked = [];
       for (const todo of archivedTodos) {
         const blocked = await isBlocked(todo.id);
@@ -214,10 +202,8 @@ function registerTodoRoutes(app, requireAuth) {
         return res.json([]);
       }
 
-      // Filter by archive status
       let filtered = todos;
       if (archived === 'true') {
-        // Show only archived
         filtered = todos.filter(todo => todo.archived === true);
       } else if (include_archived !== 'true') {
         // Default: exclude archived
@@ -225,7 +211,6 @@ function registerTodoRoutes(app, requireAuth) {
       }
       // else: include_archived=true shows all
 
-      // Add is_blocked, comment_count, assignees, and project to each todo
       const todosWithBlocked = [];
       for (const todo of filtered) {
         const blocked = await isBlocked(todo.id);
@@ -251,7 +236,6 @@ function registerTodoRoutes(app, requireAuth) {
         todosWithBlocked = todosWithBlocked.filter(todo => todo.status === status);
       }
 
-      // Filter by assigned_to if provided
       let result = todosWithBlocked;
       if (assigned_to) {
         const userId = parseInt(assigned_to);
@@ -260,7 +244,6 @@ function registerTodoRoutes(app, requireAuth) {
         );
       }
 
-      // Filter by project_id if provided
       if (project_id !== undefined) {
         if (project_id === 'none') {
           result = result.filter(todo => !todo.project_id);
@@ -270,22 +253,18 @@ function registerTodoRoutes(app, requireAuth) {
         }
       }
 
-      // Filter by priority if provided
       if (priority) {
         result = result.filter(todo => todo.priority === priority);
       }
 
-      // Filter by overdue if provided
       if (overdue === 'true') {
         result = result.filter(todo => todo.is_overdue);
       }
 
-      // Filter by due_before if provided
       if (due_before) {
         result = result.filter(todo => todo.due_date && todo.due_date < due_before);
       }
 
-      // Filter by due_after if provided
       if (due_after) {
         result = result.filter(todo => todo.due_date && todo.due_date > due_after);
       }
@@ -331,10 +310,8 @@ function registerTodoRoutes(app, requireAuth) {
         return res.json([]);
       }
 
-      // Filter to only non-archived overdue todos
       let filtered = todos.filter(todo => !todo.archived && isOverdue(todo));
 
-      // Add is_blocked, comment_count, assignees, and project to each todo
       const todosWithBlocked = [];
       for (const todo of filtered) {
         const blocked = await isBlocked(todo.id);
@@ -352,14 +329,12 @@ function registerTodoRoutes(app, requireAuth) {
         todosWithBlocked.push(enrichedTodo);
       }
 
-      // Sort by due_date ascending (soonest first)
       todosWithBlocked.sort((a, b) => {
         const aDate = a.due_date || '9999-12-31';
         const bDate = b.due_date || '9999-12-31';
         return aDate.localeCompare(bDate);
       });
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'list_overdue', null, {});
 
       res.json(todosWithBlocked);
@@ -368,7 +343,6 @@ function registerTodoRoutes(app, requireAuth) {
     }
   });
 
-  // GET /todos/summary - Get todo summary
   app.get('/todos/summary', requireAuth, async (req, res) => {
     try {
       const todos = await getAll('todos');
@@ -377,7 +351,6 @@ function registerTodoRoutes(app, requireAuth) {
         return res.json({ total: 0, open: 0, done: 0, overdue: 0, by_priority: { low: 0, medium: 0, high: 0, urgent: 0 } });
       }
 
-      // Filter to only non-archived todos
       const nonArchivedTodos = todos.filter(todo => !todo.archived);
 
       const summary = {
@@ -416,7 +389,6 @@ function registerTodoRoutes(app, requireAuth) {
     }
   });
 
-  // GET /todos/:id - Get a single todo
   app.get('/todos/:id', requireAuth, async (req, res) => {
     const { id } = req.params;
 
@@ -426,26 +398,19 @@ function registerTodoRoutes(app, requireAuth) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'view_todo', id, {});
 
-      // Get relations for this todo
       const relations = await getRelations(id);
 
-      // Get blocking info for this todo
       const blocked_by = await getBlockers(id);
       const blocked = await isBlocked(id);
 
-      // Get comments for this todo
       const comments = await getComments(id);
 
-      // Get assignees for this todo
       const assignees = await getAssignees(id);
 
-      // Get project info for this todo
       const project = await getProjectInfo(todo.project_id);
 
-      // Get initiative for this todo
       const initiative = await getInitiativeForTodo(id);
 
       const response = {
@@ -467,7 +432,6 @@ function registerTodoRoutes(app, requireAuth) {
     }
   });
 
-  // PUT /todos/:id - Update a todo
   app.put('/todos/:id', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { title, description, status, project_id, due_date, priority } = req.body;
@@ -478,12 +442,10 @@ function registerTodoRoutes(app, requireAuth) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      // Check if todo is archived
       if (todo.archived) {
         return res.status(409).json({ error: 'todo is archived' });
       }
 
-      // Validate title if provided
       if (title !== undefined) {
         if (!title || typeof title !== 'string' || !title.trim()) {
           return res.status(400).json({ error: 'title is required' });
@@ -494,7 +456,6 @@ function registerTodoRoutes(app, requireAuth) {
         }
       }
 
-      // Validate description if provided
       if (description !== undefined && description !== null) {
         const trimmedDesc = String(description).trim();
         if (trimmedDesc.length > 2000) {
@@ -502,7 +463,6 @@ function registerTodoRoutes(app, requireAuth) {
         }
       }
 
-      // Validate priority if provided
       if (priority !== undefined) {
         const validPriorities = ['low', 'medium', 'high', 'urgent'];
         if (!validPriorities.includes(priority)) {
@@ -510,7 +470,6 @@ function registerTodoRoutes(app, requireAuth) {
         }
       }
 
-      // Validate due_date if provided
       if (due_date !== undefined) {
         if (due_date !== null) {
           if (!/^\d{4}-\d{2}-\d{2}$/.test(due_date)) {
@@ -523,7 +482,6 @@ function registerTodoRoutes(app, requireAuth) {
         }
       }
 
-      // Check if trying to mark as done while blocked
       if (status === 'done' && status !== todo.status) {
         const blocked = await isBlocked(id);
         if (blocked) {
@@ -535,7 +493,6 @@ function registerTodoRoutes(app, requireAuth) {
 
       const changes = {};
 
-      // Track what changed
       if (title !== undefined && title !== todo.title) {
         const trimmedTitle = title.trim();
         changes.title = { from: todo.title, to: trimmedTitle };
@@ -550,7 +507,6 @@ function registerTodoRoutes(app, requireAuth) {
         changes.status = { from: todo.status, to: status };
         todo.status = status;
 
-        // Update completed_at based on status
         if (status === 'done') {
           todo.completed_at = new Date().toISOString();
         } else if (status === 'open') {
@@ -558,11 +514,9 @@ function registerTodoRoutes(app, requireAuth) {
         }
       }
 
-      // Handle project_id change
       if (project_id !== undefined && project_id !== todo.project_id) {
-        // If project_id is not null, verify project exists
         if (project_id !== null) {
-          const project = await getById('projects', project_id);
+          const project = await getById(PROJECTS_TABLE, project_id);
           if (!project) {
             return res.status(404).json({ error: 'project not found' });
           }
@@ -571,13 +525,11 @@ function registerTodoRoutes(app, requireAuth) {
         todo.project_id = project_id;
       }
 
-      // Handle priority change
       if (priority !== undefined && priority !== todo.priority) {
         changes.priority = { from: todo.priority, to: priority };
         todo.priority = priority;
       }
 
-      // Handle due_date change
       if (due_date !== undefined && due_date !== todo.due_date) {
         changes.due_date = { from: todo.due_date, to: due_date };
         todo.due_date = due_date;
@@ -585,7 +537,6 @@ function registerTodoRoutes(app, requireAuth) {
 
       todo.updated_at = new Date().toISOString();
 
-      // Update in database
       await update('todos', id, todo);
 
       // Recalculate initiative if status changed
@@ -593,17 +544,14 @@ function registerTodoRoutes(app, requireAuth) {
         await recalculateInitiativeForTodo(parseInt(id));
       }
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'update_todo', id, changes);
 
-      // Publish event
       await publishEvent('todos', {
         type: 'todo.updated',
         todo,
         by: req.user.username
       });
 
-      // Handle completion notifications
       if (changes.status && changes.status.to === 'done') {
         const assignees = await getAssignees(id);
         const databaseName = getDatabaseName();
@@ -637,7 +585,6 @@ function registerTodoRoutes(app, requireAuth) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      // Delete all links referencing this todo
       try {
         const allLinks = await getAll('todo_links');
         if (Array.isArray(allLinks)) {
@@ -651,7 +598,6 @@ function registerTodoRoutes(app, requireAuth) {
         console.error('Error deleting related links:', error);
       }
 
-      // Delete all comments for this todo
       try {
         const allComments = await getAll('comments');
         if (Array.isArray(allComments)) {
@@ -665,7 +611,6 @@ function registerTodoRoutes(app, requireAuth) {
         console.error('Error deleting related comments:', error);
       }
 
-      // Delete all assignments for this todo
       try {
         const allAssignments = await getAll('todo_users');
         if (Array.isArray(allAssignments)) {
@@ -684,10 +629,8 @@ function registerTodoRoutes(app, requireAuth) {
       todo.archived_at = new Date().toISOString();
       await update('todos', id, todo);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'delete_todo', id, {});
 
-      // Publish event
       await publishEvent('todos', {
         type: 'todo.deleted',
         todo,
@@ -700,7 +643,6 @@ function registerTodoRoutes(app, requireAuth) {
     }
   });
 
-  // POST /todos/:id/complete - Mark a todo as done
   app.post('/todos/:id/complete', requireAuth, async (req, res) => {
     const { id } = req.params;
 
@@ -710,12 +652,10 @@ function registerTodoRoutes(app, requireAuth) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      // Check if todo is archived
       if (todo.archived) {
         return res.status(409).json({ error: 'todo is archived' });
       }
 
-      // Check if blocked
       const blocked = await isBlocked(id);
       if (blocked) {
         const blockers = await getBlockers(id);
@@ -729,13 +669,10 @@ function registerTodoRoutes(app, requireAuth) {
 
       await update('todos', id, todo);
 
-      // Recalculate initiative
       await recalculateInitiativeForTodo(parseInt(id));
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'complete_todo', id, {});
 
-      // Send completion notifications to assignees
       const assignees = await getAssignees(id);
       const databaseName = getDatabaseName();
       for (const assignee of assignees) {
@@ -762,7 +699,6 @@ function registerTodoRoutes(app, requireAuth) {
     const { id } = req.params;
     const { days } = req.body;
 
-    // Validate days parameter
     if (days === undefined || days === null) {
       return res.status(400).json({ error: 'days is required' });
     }
@@ -777,12 +713,10 @@ function registerTodoRoutes(app, requireAuth) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      // Check if todo is archived
       if (todo.archived) {
         return res.status(409).json({ error: 'todo is archived' });
       }
 
-      // Calculate new due date
       const today = new Date().toISOString().split('T')[0];
       const baseDateStr = todo.due_date || today;
       const baseDate = new Date(baseDateStr + 'T00:00:00Z');
@@ -795,7 +729,6 @@ function registerTodoRoutes(app, requireAuth) {
 
       await update('todos', id, todo);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'snooze_todo', id, {
         days: daysNum,
         old_due_date: oldDueDate,
@@ -808,7 +741,6 @@ function registerTodoRoutes(app, requireAuth) {
     }
   });
 
-  // POST /todos/:id/restore - Restore an archived todo
   app.post('/todos/:id/restore', requireAuth, async (req, res) => {
     const { id } = req.params;
 
@@ -818,20 +750,16 @@ function registerTodoRoutes(app, requireAuth) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      // Check if todo is actually archived
       if (!todo.archived) {
         return res.status(400).json({ error: 'todo is not archived' });
       }
 
-      // Restore the todo
       todo.archived = false;
       todo.archived_at = null;
       await update('todos', id, todo);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'restore_todo', id, {});
 
-      // Publish event
       await publishEvent('todos', {
         type: 'todo.restored',
         todo,
@@ -844,7 +772,6 @@ function registerTodoRoutes(app, requireAuth) {
     }
   });
 
-  // GET /users/:id/log - Get user's action log
   app.get('/users/:id/log', requireAuth, async (req, res) => {
     const { id } = req.params;
 

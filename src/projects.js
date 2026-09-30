@@ -1,16 +1,14 @@
-// Projects module for organizing todos
 
 const { getAll, getById, insert, update, remove } = require('./db');
 const { logAction } = require('./logging');
 const { publishEvent } = require('./notifications');
 
-// Register project routes
+const PROJECTS_TABLE = 'projects';
+
 function registerProjectRoutes(app, requireAuth) {
-  // POST /projects - Create a project
   app.post('/projects', requireAuth, async (req, res) => {
     const { name, description } = req.body;
 
-    // Validate name
     if (!name || typeof name !== 'string' || !name.trim()) {
       return res.status(400).json({ error: 'name is required' });
     }
@@ -19,7 +17,6 @@ function registerProjectRoutes(app, requireAuth) {
       return res.status(400).json({ error: 'name too long (max 100)' });
     }
 
-    // Validate description
     let trimmedDescription = description;
     if (description !== undefined && description !== null) {
       trimmedDescription = String(description).trim();
@@ -29,8 +26,7 @@ function registerProjectRoutes(app, requireAuth) {
     }
 
     try {
-      // Check if project name already exists (case-insensitive)
-      const allProjects = await getAll('projects');
+      const allProjects = await getAll(PROJECTS_TABLE);
       if (Array.isArray(allProjects)) {
         const exists = allProjects.some(p => p.name.toLowerCase() === trimmedName.toLowerCase());
         if (exists) {
@@ -47,16 +43,14 @@ function registerProjectRoutes(app, requireAuth) {
         updated_at: now
       };
 
-      const project = await insert('projects', projectRecord);
+      const project = await insert(PROJECTS_TABLE, projectRecord);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'create_project', project.id, {
         name: trimmedName,
         description: trimmedDescription || null
       });
 
-      // Publish event
-      await publishEvent('projects', {
+      await publishEvent(PROJECTS_TABLE, {
         type: 'project.created',
         project,
         by: req.user.username
@@ -69,7 +63,6 @@ function registerProjectRoutes(app, requireAuth) {
     }
   });
 
-  // GET /projects - List all projects
   app.get('/projects', requireAuth, async (req, res) => {
     try {
       const projects = await getAll('projects');
@@ -80,17 +73,15 @@ function registerProjectRoutes(app, requireAuth) {
     }
   });
 
-  // GET /projects/:id - Get a single project with todos
   app.get('/projects/:id', requireAuth, async (req, res) => {
     const { id } = req.params;
 
     try {
-      const project = await getById('projects', id);
+      const project = await getById(PROJECTS_TABLE, id);
       if (!project) {
         return res.status(404).json({ error: 'project not found' });
       }
 
-      // Get todos for this project
       const allTodos = await getAll('todos');
       const todos = Array.isArray(allTodos)
         ? allTodos.filter(t => t.project_id === parseInt(id) && !t.archived)
@@ -108,12 +99,11 @@ function registerProjectRoutes(app, requireAuth) {
     }
   });
 
-  // GET /projects/:id/todos - Get todos for a project
   app.get('/projects/:id/todos', requireAuth, async (req, res) => {
     const { id } = req.params;
 
     try {
-      const project = await getById('projects', id);
+      const project = await getById(PROJECTS_TABLE, id);
       if (!project) {
         return res.status(404).json({ error: 'project not found' });
       }
@@ -129,18 +119,16 @@ function registerProjectRoutes(app, requireAuth) {
     }
   });
 
-  // PUT /projects/:id - Update a project
   app.put('/projects/:id', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { name, description } = req.body;
 
     try {
-      const project = await getById('projects', id);
+      const project = await getById(PROJECTS_TABLE, id);
       if (!project) {
         return res.status(404).json({ error: 'project not found' });
       }
 
-      // Validate name if provided
       if (name !== undefined) {
         if (!name || typeof name !== 'string' || !name.trim()) {
           return res.status(400).json({ error: 'name is required' });
@@ -151,7 +139,6 @@ function registerProjectRoutes(app, requireAuth) {
         }
       }
 
-      // Validate description if provided
       if (description !== undefined && description !== null) {
         const trimmedDesc = String(description).trim();
         if (trimmedDesc.length > 1000) {
@@ -161,10 +148,9 @@ function registerProjectRoutes(app, requireAuth) {
 
       const changes = {};
 
-      // Check if updating name and if it already exists
       if (name !== undefined && name !== project.name) {
         const trimmedName = name.trim();
-        const allProjects = await getAll('projects');
+        const allProjects = await getAll(PROJECTS_TABLE);
         if (Array.isArray(allProjects)) {
           const exists = allProjects.some(p => p.id !== parseInt(id) && p.name.toLowerCase() === trimmedName.toLowerCase());
           if (exists) {
@@ -183,13 +169,11 @@ function registerProjectRoutes(app, requireAuth) {
 
       project.updated_at = new Date().toISOString();
 
-      await update('projects', id, project);
+      await update(PROJECTS_TABLE, id, project);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'update_project', parseInt(id), changes);
 
-      // Publish event
-      await publishEvent('projects', {
+      await publishEvent(PROJECTS_TABLE, {
         type: 'project.updated',
         project,
         by: req.user.username
@@ -206,12 +190,11 @@ function registerProjectRoutes(app, requireAuth) {
     const { id } = req.params;
 
     try {
-      const project = await getById('projects', id);
+      const project = await getById(PROJECTS_TABLE, id);
       if (!project) {
         return res.status(404).json({ error: 'project not found' });
       }
 
-      // Set project_id to null for all todos in this project
       try {
         const allTodos = await getAll('todos');
         if (Array.isArray(allTodos)) {
@@ -226,13 +209,11 @@ function registerProjectRoutes(app, requireAuth) {
         console.error('Error updating todos after project deletion:', error);
       }
 
-      await remove('projects', id);
+      await remove(PROJECTS_TABLE, id);
 
-      // Log the action
       await logAction(req.user.id, req.user.username, 'delete_project', parseInt(id), {});
 
-      // Publish event
-      await publishEvent('projects', {
+      await publishEvent(PROJECTS_TABLE, {
         type: 'project.deleted',
         project,
         by: req.user.username
