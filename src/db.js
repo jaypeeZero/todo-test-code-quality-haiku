@@ -1,6 +1,21 @@
 // Database module for communicating with the fake database service over HTTP
 
-const baseURL = process.env.DATABASE_URL || 'http://localhost:4001';
+let baseURL;
+let databaseName;
+
+if (process.env.DATABASE_URL) {
+  baseURL = process.env.DATABASE_URL;
+  databaseName = 'custom';
+} else {
+  const databaseKind = process.env.DATABASE_KIND || 'memory';
+  if (databaseKind === 'file') {
+    baseURL = 'http://localhost:4003';
+    databaseName = 'file';
+  } else {
+    baseURL = 'http://localhost:4001';
+    databaseName = 'memory';
+  }
+}
 
 async function makeRequest(method, path, body = null) {
   const url = `${baseURL}${path}`;
@@ -10,22 +25,21 @@ async function makeRequest(method, path, body = null) {
       'Content-Type': 'application/json'
     }
   };
-
   if (body) {
     options.body = JSON.stringify(body);
   }
-
   const response = await fetch(url, options);
-
   if (response.status === 204) {
     return null;
   }
-
   return response.json();
 }
 
 async function getAll(table, filters = {}) {
-  const params = new URLSearchParams(filters);
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    params.append(key, value);
+  });
   const query = params.toString() ? `?${params.toString()}` : '';
   return makeRequest('GET', `/tables/${table}${query}`);
 }
@@ -46,10 +60,16 @@ async function remove(table, id) {
   return makeRequest('DELETE', `/tables/${table}/${id}`);
 }
 
+function getDatabaseName() {
+  return databaseName;
+}
+
 module.exports = {
   getAll,
   getById,
   insert,
   update,
-  remove
+  remove,
+  getDatabaseName,
+  baseURL
 };

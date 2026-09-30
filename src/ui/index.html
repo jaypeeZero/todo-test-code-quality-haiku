@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Todo App</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Login Screen -->
+  <div id="login-screen" class="screen">
+    <div class="login-container">
+      <h1>Todo App</h1>
+      <form id="login-form">
+        <input type="text" id="username" placeholder="Username" required>
+        <input type="password" id="password" placeholder="Password" required>
+        <button type="submit">Login</button>
+      </form>
+      <p id="login-error" class="error"></p>
+    </div>
+  </div>
+
+  <!-- Main App Screen -->
+  <div id="app-screen" class="screen" style="display: none;">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <h1>Todo App</h1>
+      </div>
+      <div class="header-center">
+        <select id="project-switcher" class="project-switcher">
+          <option value="none">No project</option>
+        </select>
+      </div>
+      <div class="header-right">
+        <div class="notifications-panel">
+          <button id="notifications-btn" class="notifications-btn">🔔 Notifications</button>
+          <div id="notifications-list" class="notifications-list" style="display: none;"></div>
+        </div>
+        <div class="user-info">
+          <span id="username-display"></span>
+          <button id="logout-btn" class="logout-btn">Logout</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- Navigation Tabs -->
+      <nav class="nav-tabs">
+        <button class="tab-btn active" data-tab="todos">Todos</button>
+        <button class="tab-btn" data-tab="projects">Projects</button>
+        <button class="tab-btn" data-tab="initiatives">Initiatives</button>
+      </nav>
+
+      <!-- Todos Section -->
+      <section id="todos-tab" class="tab-content active">
+        <div class="todos-section">
+          <!-- New Todo Form -->
+          <div class="new-todo-form">
+            <h2>New Todo</h2>
+            <form id="new-todo-form">
+              <input type="text" id="todo-title" placeholder="Title" required>
+              <textarea id="todo-description" placeholder="Description (optional)"></textarea>
+              <select id="todo-priority" class="priority-select">
+                <option value="low">Low</option>
+                <option value="medium" selected>Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+              <input type="date" id="todo-due-date">
+              <button type="submit">Create Todo</button>
+            </form>
+          </div>
+
+          <!-- Todos List -->
+          <div class="todos-list">
+            <h2>Todos for <span id="current-project-name">No project</span></h2>
+            <div id="todos-container" class="todos-grid"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Projects Section -->
+      <section id="projects-tab" class="tab-content" style="display: none;">
+        <div class="projects-section">
+          <!-- New Project Form -->
+          <div class="new-project-form">
+            <h2>New Project</h2>
+            <form id="new-project-form">
+              <input type="text" id="project-name" placeholder="Project name" required>
+              <textarea id="project-description" placeholder="Description (optional)"></textarea>
+              <button type="submit">Create Project</button>
+            </form>
+          </div>
+
+          <!-- Projects List -->
+          <div class="projects-list">
+            <h2>All Projects</h2>
+            <div id="projects-container" class="projects-grid"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Initiatives Section -->
+      <section id="initiatives-tab" class="tab-content" style="display: none;">
+        <div class="initiatives-section">
+          <!-- New Initiative Form -->
+          <div class="new-initiative-form">
+            <h2>New Initiative</h2>
+            <form id="new-initiative-form">
+              <input type="text" id="initiative-name" placeholder="Initiative name" required>
+              <textarea id="initiative-description" placeholder="Description (optional)"></textarea>
+              <div id="project-multi-select" class="multi-select"></div>
+              <button type="submit">Create Initiative</button>
+            </form>
+          </div>
+
+          <!-- Initiatives List -->
+          <div class="initiatives-list">
+            <h2>All Initiatives</h2>
+            <div id="initiatives-container" class="initiatives-grid"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- Todo Detail Panel -->
+  <div id="detail-panel" class="detail-panel" style="display: none;">
+    <button id="close-detail-btn" class="close-btn">×</button>
+    <div class="detail-content">
+      <!-- Todo Title and Status -->
+      <h2 id="detail-title"></h2>
+      <div class="detail-meta">
+        <div class="status-control">
+          <label>Status:</label>
+          <select id="detail-status" class="status-select">
+            <option value="open">Open</option>
+            <option value="done">Done</option>
+          </select>
+        </div>
+        <div class="priority-control">
+          <label>Priority:</label>
+          <select id="detail-priority" class="priority-select">
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+          </select>
+        </div>
+        <div class="due-date-control">
+          <label>Due Date:</label>
+          <input type="date" id="detail-due-date">
+        </div>
+      </div>
+
+      <!-- Description -->
+      <div class="detail-section">
+        <h3>Description</h3>
+        <p id="detail-description"></p>
+      </div>
+
+      <!-- Initiative -->
+      <div class="detail-section" id="initiative-section" style="display: none;">
+        <h3>Initiative</h3>
+        <p id="detail-initiative"></p>
+      </div>
+
+      <!-- Assignees -->
+      <div class="detail-section">
+        <h3>Assignees</h3>
+        <div id="detail-assignees" class="assignees-list"></div>
+        <div class="add-assignee">
+          <select id="assignee-select" class="assignee-select">
+            <option value="">Select user to assign...</option>
+          </select>
+          <button id="add-assignee-btn">Add</button>
+        </div>
+      </div>
+
+      <!-- Comments -->
+      <div class="detail-section">
+        <h3>Comments</h3>
+        <div id="detail-comments" class="comments-list"></div>
+        <div class="add-comment">
+          <textarea id="comment-body" placeholder="Add a comment..."></textarea>
+          <button id="add-comment-btn">Post Comment</button>
+        </div>
+      </div>
+
+      <!-- Relations -->
+      <div class="detail-section">
+        <h3>Relations</h3>
+        <div id="detail-relations" class="relations-section"></div>
+      </div>
+
+      <!-- Blockers -->
+      <div class="detail-section">
+        <h3>Blockers</h3>
+        <div id="detail-blockers" class="blockers-list"></div>
+        <div class="add-blocker">
+          <input type="number" id="blocker-todo-id" placeholder="Todo ID that blocks this">
+          <button id="add-blocker-btn">Add Blocker</button>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div class="detail-actions">
+        <button id="complete-btn" class="action-btn">Complete</button>
+        <button id="reopen-btn" class="action-btn" style="display: none;">Reopen</button>
+        <button id="archive-btn" class="action-btn archive-btn">Archive</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
