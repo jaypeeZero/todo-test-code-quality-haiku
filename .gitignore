@@ -1,0 +1,4 @@
+node_modules
+.scruple/node_modules
+.env.local
+fake_external_services/fake_file_database/data

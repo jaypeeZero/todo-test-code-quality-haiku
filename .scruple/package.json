@@ -1,0 +1,19 @@
+{
+  "name": "todo-app-scruple-tooling",
+  "private": true,
+  "description": "Dependencies for the experimental Scruple lint. Installed on demand by `npm run scruple`; never by the root install.",
+  "license": "UNLICENSED",
+  "type": "module",
+  "devDependencies": {
+    "@scruple/cli": "^0.2.0",
+    "@scruple/comments": "^0.2.0",
+    "@scruple/core": "^0.2.0",
+    "@scruple/errors": "^0.2.0",
+    "@scruple/parser-oxc": "^0.2.0",
+    "@scruple/provider-jev": "^0.2.0",
+    "@scruple/relational-databases": "^0.2.0",
+    "@scruple/tests": "^0.2.0",
+    "scruple-plugin-ideology": "git+https://github.com/jaypeeZero/scruple-plugin-ideology.git#v0.3.0",
+    "scruple-provider-cache": "git+https://github.com/jaypeeZero/scruple-provider-cache.git#v0.1.0"
+  }
+}
