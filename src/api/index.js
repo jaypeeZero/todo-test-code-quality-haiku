@@ -1,7 +1,7 @@
 const express = require('express');
-const { start: startFakeDatabase } = require('../fake_external_services/fake_database/server');
-const { start: startFakeFileDatabase } = require('../fake_external_services/fake_file_database/server');
-const { start: startFakeNotifications } = require('../fake_external_services/fake_notifications/server');
+const { start: startFakeDatabase } = require('../../fake_external_services/fake_database/server');
+const { start: startFakeFileDatabase } = require('../../fake_external_services/fake_file_database/server');
+const { start: startFakeNotifications } = require('../../fake_external_services/fake_notifications/server');
 const { login, logout, getUserByToken, getAllUsers, requireAuth } = require('./auth');
 const { registerTodoRoutes } = require('./todos');
 const { registerLinkRoutes } = require('./links');
