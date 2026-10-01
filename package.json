@@ -2,9 +2,9 @@
   "name": "todo-app",
   "version": "1.0.0",
   "description": "Todo application",
-  "main": "src/index.js",
+  "main": "src/api/index.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node src/api/index.js",
     "//scruple": "EXPERIMENTAL. Installs its own dependencies under .scruple/ on first run and sends source excerpts to an external service. Run only when asked. See .scruple/README.md.",
     "scruple": "npm --prefix .scruple ci --silent && node --env-file-if-exists=.env.local .scruple/node_modules/@scruple/cli/dist/bin.js -c .scruple/scruple.config.ts"
   },

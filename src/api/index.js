@@ -1,8 +1,8 @@
 const express = require('express');
-const { start: startFakeDatabase } = require('../fake_external_services/fake_database/server');
-const { start: startFakeFileDatabase } = require('../fake_external_services/fake_file_database/server');
-const { start: startFakeNotifications } = require('../fake_external_services/fake_notifications/server');
-const { login, logout, getUserByToken, getAllUsers, requireAuth } = require('./auth');
+const { start: startFakeDatabase } = require('../../fake_external_services/fake_database/server');
+const { start: startFakeFileDatabase } = require('../../fake_external_services/fake_file_database/server');
+const { NotificationServer } = require('../../fake_external_services/fake_notifications/server');
+const { Auth, parseUsers } = require('./auth');
 const { registerTodoRoutes } = require('./todos');
 const { registerLinkRoutes } = require('./links');
 const { registerBlockerRoutes } = require('./blockers');
@@ -12,8 +12,7 @@ const { registerProjectRoutes } = require('./projects');
 const { registerBulkRoutes } = require('./bulk');
 const { registerInitiativeRoutes } = require('./initiatives');
 const { registerV2Routes } = require('./v2');
-const { getDatabaseName, baseURL } = require('./db');
-const { getCurrentProject, setCurrentProject } = require('./auth');
+const { Db } = require('./db');
 const { NOTIFICATIONS_ENABLED, APP_ENV, getNotifyApiKey } = require('./notifications');
 
 const DEFAULT_NOTIFICATIONS_URL = 'http://localhost:4002';
@@ -24,6 +23,10 @@ const CURRENT_PROJECT_ENDPOINT = '/me/current-project';
 const app = express();
 const port = process.env.PORT || 3000;
 
+const db = new Db();
+const auth = new Auth(parseUsers(process.env.APP_USERS || 'alice:password1,bob:password2,carol:password3'));
+const requireAuth = (req, res, next) => auth.requireAuth(req, res, next);
+
 app.use(express.json());
 app.use(express.static('/Users/wrigjame/code/todo_test/src/ui'));
 
@@ -32,18 +35,18 @@ console.log(`Notifications ${NOTIFICATIONS_ENABLED ? 'enabled' : 'disabled'}, en
 console.log('Starting fake services...');
 startFakeDatabase();
 startFakeFileDatabase();
-startFakeNotifications();
+new NotificationServer(process.env.FAKE_NOTIFY_PORT || 4002, process.env.FAKE_NOTIFY_API_KEY || 'test-key-123').start();
 
-function registerRoutes(app, port, baseURL, getDatabaseName, NOTIFICATIONS_ENABLED, APP_ENV, getNotifyApiKey, login, logout, requireAuth, getCurrentProject, setCurrentProject, registerProjectRoutes, registerBulkRoutes, registerTodoRoutes, registerLinkRoutes, registerBlockerRoutes, registerCommentRoutes, registerAssigneeRoutes, registerInitiativeRoutes, registerV2Routes) {
+function registerRoutes(app, port, db, auth, requireAuth, NOTIFICATIONS_ENABLED, APP_ENV, getNotifyApiKey, registerProjectRoutes, registerBulkRoutes, registerTodoRoutes, registerLinkRoutes, registerBlockerRoutes, registerCommentRoutes, registerAssigneeRoutes, registerInitiativeRoutes, registerV2Routes) {
   app.get('/health', async (req, res) => {
     try {
-      const dbResponse = await fetch(`${baseURL}/health`);
+      const dbResponse = await fetch(`${db.getBaseURL()}/health`);
       const dbStatus = await dbResponse.json();
 
       res.json({
         status: 'ok',
         database: dbStatus.status,
-        databaseKind: getDatabaseName(),
+        databaseKind: db.getDatabaseName(),
         notifications: {
           enabled: NOTIFICATIONS_ENABLED,
           env: APP_ENV,
@@ -54,7 +57,7 @@ function registerRoutes(app, port, baseURL, getDatabaseName, NOTIFICATIONS_ENABL
       res.status(503).json({
         status: 'error',
         database: 'unavailable',
-        databaseKind: getDatabaseName(),
+        databaseKind: db.getDatabaseName(),
         notifications: {
           enabled: NOTIFICATIONS_ENABLED,
           env: APP_ENV,
@@ -66,7 +69,7 @@ function registerRoutes(app, port, baseURL, getDatabaseName, NOTIFICATIONS_ENABL
 
   app.post('/login', (req, res) => {
     const { username, password } = req.body;
-    const result = login(username, password);
+    const result = auth.login(username, password);
     if (!result) {
       return res.status(401).json({ error: 'invalid credentials' });
     }
@@ -76,7 +79,7 @@ function registerRoutes(app, port, baseURL, getDatabaseName, NOTIFICATIONS_ENABL
   app.post('/logout', requireAuth, (req, res) => {
     const authHeader = req.get('Authorization');
     const token = authHeader.match(/^Bearer (.+)$/)[1];
-    logout(token);
+    auth.logout(token);
     res.status(204).send();
   });
 
@@ -84,12 +87,12 @@ function registerRoutes(app, port, baseURL, getDatabaseName, NOTIFICATIONS_ENABL
     res.json({
       id: req.user.id,
       username: req.user.username,
-      current_project_id: getCurrentProject(req.user.id)
+      current_project_id: auth.getCurrentProject(req.user.id)
     });
   });
 
   app.get('/users', requireAuth, (req, res) => {
-    res.json(getAllUsers());
+    res.json(auth.getAllUsers());
   });
 
   // Get sent notifications (proxy to provider)
@@ -141,21 +144,20 @@ function registerRoutes(app, port, baseURL, getDatabaseName, NOTIFICATIONS_ENABL
     }
   });
 
-  registerProjectRoutes(app, requireAuth);
+  registerProjectRoutes(app, requireAuth, db);
 
   app.put(CURRENT_PROJECT_ENDPOINT, requireAuth, async (req, res) => {
     const { project_id } = req.body;
 
     try {
       if (project_id !== null && project_id !== undefined) {
-        const { getById } = require('./db');
-        const project = await getById(PROJECTS_TABLE, project_id);
+        const project = await db.getById(PROJECTS_TABLE, project_id);
         if (!project) {
           return res.status(404).json({ error: 'project not found' });
         }
       }
 
-      setCurrentProject(req.user.id, project_id);
+      auth.setCurrentProject(req.user.id, project_id);
       res.json({ success: true });
     } catch (error) {
       console.error('Error setting current project:', error);
@@ -165,13 +167,12 @@ function registerRoutes(app, port, baseURL, getDatabaseName, NOTIFICATIONS_ENABL
 
   app.get(CURRENT_PROJECT_ENDPOINT, requireAuth, async (req, res) => {
     try {
-      const projectId = getCurrentProject(req.user.id);
+      const projectId = auth.getCurrentProject(req.user.id);
       if (projectId === null || projectId === undefined) {
         return res.json({ project: null });
       }
 
-      const { getById } = require('./db');
-      const project = await getById(PROJECTS_TABLE, projectId);
+      const project = await db.getById(PROJECTS_TABLE, projectId);
       res.json({ project: project || null });
     } catch (error) {
       console.error('Error fetching current project:', error);
@@ -180,21 +181,21 @@ function registerRoutes(app, port, baseURL, getDatabaseName, NOTIFICATIONS_ENABL
   });
 
   // Register bulk routes (before todo routes so specific paths match first)
-  registerBulkRoutes(app, requireAuth);
+  registerBulkRoutes(app, requireAuth, db);
 
-  registerTodoRoutes(app, requireAuth);
+  registerTodoRoutes(app, requireAuth, db, auth);
 
-  registerLinkRoutes(app, requireAuth);
+  registerLinkRoutes(app, requireAuth, db);
 
-  registerBlockerRoutes(app, requireAuth);
+  registerBlockerRoutes(app, requireAuth, db);
 
-  registerCommentRoutes(app, requireAuth);
+  registerCommentRoutes(app, requireAuth, db, auth);
 
-  registerAssigneeRoutes(app, requireAuth);
+  registerAssigneeRoutes(app, requireAuth, db, auth);
 
-  registerInitiativeRoutes(app, requireAuth);
+  registerInitiativeRoutes(app, requireAuth, db);
 
-  registerV2Routes(app, requireAuth);
+  registerV2Routes(app, requireAuth, db, auth);
 
   app.listen(port, () => {
     console.log(`Todo app running on port ${port}`);
@@ -202,4 +203,4 @@ function registerRoutes(app, port, baseURL, getDatabaseName, NOTIFICATIONS_ENABL
 }
 
 // Give services a moment to start
-setTimeout(() => registerRoutes(app, port, baseURL, getDatabaseName, NOTIFICATIONS_ENABLED, APP_ENV, getNotifyApiKey, login, logout, requireAuth, getCurrentProject, setCurrentProject, registerProjectRoutes, registerBulkRoutes, registerTodoRoutes, registerLinkRoutes, registerBlockerRoutes, registerCommentRoutes, registerAssigneeRoutes, registerInitiativeRoutes, registerV2Routes), 500);
+setTimeout(() => registerRoutes(app, port, db, auth, requireAuth, NOTIFICATIONS_ENABLED, APP_ENV, getNotifyApiKey, registerProjectRoutes, registerBulkRoutes, registerTodoRoutes, registerLinkRoutes, registerBlockerRoutes, registerCommentRoutes, registerAssigneeRoutes, registerInitiativeRoutes, registerV2Routes), 500);

@@ -1,5 +1,4 @@
 
-const { getAll, getById, update } = require('./db');
 const { logAction } = require('./logging');
 
 function escapeCSV(value) {
@@ -26,7 +25,7 @@ function formatDate(dateStr) {
   return '';
 }
 
-function registerBulkRoutes(app, requireAuth) {
+function registerBulkRoutes(app, requireAuth, db) {
   app.post('/todos/bulk-complete', requireAuth, async (req, res) => {
     const { ids } = req.body;
 
@@ -40,7 +39,7 @@ function registerBulkRoutes(app, requireAuth) {
     try {
       for (const id of ids) {
         try {
-          const todo = await getById('todos', id);
+          const todo = await db.getById('todos', id);
 
           if (!todo) {
             failed.push({ id, reason: 'not found' });
@@ -57,9 +56,9 @@ function registerBulkRoutes(app, requireAuth) {
           todo.completed_at = now;
           todo.updated_at = now;
 
-          await update('todos', id, todo);
+          await db.update('todos', id, todo);
 
-          await logAction(req.user.id, req.user.username, 'bulk_complete_todo', id, {});
+          await logAction(db, req.user.id, req.user.username, 'bulk_complete_todo', id, {});
 
           completed.push(id);
         } catch (error) {
@@ -90,7 +89,7 @@ function registerBulkRoutes(app, requireAuth) {
     try {
       for (const id of ids) {
         try {
-          const todo = await getById('todos', id);
+          const todo = await db.getById('todos', id);
 
           if (!todo) {
             failed.push({ id, reason: 'not found' });
@@ -113,7 +112,7 @@ function registerBulkRoutes(app, requireAuth) {
 
           if (changes.project_id !== undefined && changes.project_id !== todo.project_id) {
             if (changes.project_id !== null) {
-              const project = await getById('projects', changes.project_id);
+              const project = await db.getById('projects', changes.project_id);
               if (!project) {
                 failed.push({ id, reason: 'project not found' });
                 continue;
@@ -176,8 +175,8 @@ function registerBulkRoutes(app, requireAuth) {
 
           if (hasChanges) {
             todo.updated_at = new Date().toISOString();
-            await update('todos', id, todo);
-            await logAction(req.user.id, req.user.username, 'bulk_update_todo', id, changeLog);
+            await db.update('todos', id, todo);
+            await logAction(db, req.user.id, req.user.username, 'bulk_update_todo', id, changeLog);
             updated.push(id);
           } else {
             failed.push({ id, reason: 'no changes applied' });
@@ -206,7 +205,7 @@ function registerBulkRoutes(app, requireAuth) {
     try {
       for (const id of ids) {
         try {
-          const todo = await getById('todos', id);
+          const todo = await db.getById('todos', id);
 
           if (!todo) {
             failed.push({ id, reason: 'not found' });
@@ -217,9 +216,9 @@ function registerBulkRoutes(app, requireAuth) {
           todo.archived = true;
           todo.archived_at = now;
 
-          await update('todos', id, todo);
+          await db.update('todos', id, todo);
 
-          await logAction(req.user.id, req.user.username, 'bulk_archive_todo', id, {});
+          await logAction(db, req.user.id, req.user.username, 'bulk_archive_todo', id, {});
 
           archived.push(id);
         } catch (error) {
@@ -238,7 +237,7 @@ function registerBulkRoutes(app, requireAuth) {
     const { include_archived } = req.query;
 
     try {
-      const todos = await getAll('todos');
+      const todos = await db.getAll('todos');
 
       if (!Array.isArray(todos)) {
         return res.status(200).set('Content-Type', 'text/csv').send('id,title,status,priority,due_date,project_id,created_by,created_at,completed_at\n');
@@ -280,12 +279,12 @@ function registerBulkRoutes(app, requireAuth) {
     const { id } = req.params;
 
     try {
-      const project = await getById('projects', id);
+      const project = await db.getById('projects', id);
       if (!project) {
         return res.status(404).json({ error: 'project not found' });
       }
 
-      const todos = await getAll('todos');
+      const todos = await db.getAll('todos');
 
       if (!Array.isArray(todos)) {
         return res.status(200).set('Content-Type', 'text/csv').send('id,title,status,priority,due_date,project_id,created_by,created_at,completed_at\n');

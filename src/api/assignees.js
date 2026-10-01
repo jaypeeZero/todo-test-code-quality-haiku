@@ -1,19 +1,17 @@
 
-const { getAll, getById, insert, remove } = require('./db');
 const { logAction } = require('./logging');
-const { getAllUsers } = require('./auth');
 const { sendNotification, publishToUser } = require('./notifications');
 
 const TODO_USERS_TABLE = 'todo_users';
 
-async function getAssignees(todoId) {
+async function getAssignees(db, auth, todoId) {
   try {
-    const assignments = await getAll(TODO_USERS_TABLE, { todo_id: todoId });
+    const assignments = await db.getAll(TODO_USERS_TABLE, { todo_id: todoId });
     if (!Array.isArray(assignments)) {
       return [];
     }
 
-    const users = getAllUsers();
+    const users = auth.getAllUsers();
     const assignees = assignments.map(assignment => {
       const user = users.find(u => u.id === String(assignment.user_id));
       return {
@@ -31,7 +29,7 @@ async function getAssignees(todoId) {
   }
 }
 
-function registerAssigneeRoutes(app, requireAuth) {
+function registerAssigneeRoutes(app, requireAuth, db, auth) {
   app.post('/todos/:id/users', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { user_id } = req.body;
@@ -41,18 +39,18 @@ function registerAssigneeRoutes(app, requireAuth) {
     }
 
     try {
-      const todo = await getById('todos', id);
+      const todo = await db.getById('todos', id);
       if (!todo) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      const users = getAllUsers();
+      const users = auth.getAllUsers();
       const user = users.find(u => u.id === String(user_id));
       if (!user) {
         return res.status(404).json({ error: 'user not found' });
       }
 
-      const assignments = await getAll(TODO_USERS_TABLE, { todo_id: parseInt(id), user_id: parseInt(user_id) });
+      const assignments = await db.getAll(TODO_USERS_TABLE, { todo_id: parseInt(id), user_id: parseInt(user_id) });
       if (Array.isArray(assignments) && assignments.length > 0) {
         return res.status(400).json({ error: 'user is already assigned to this todo' });
       }
@@ -65,9 +63,9 @@ function registerAssigneeRoutes(app, requireAuth) {
         assigned_at: now
       };
 
-      const assignment = await insert(TODO_USERS_TABLE, assignmentRecord);
+      const assignment = await db.insert(TODO_USERS_TABLE, assignmentRecord);
 
-      await logAction(req.user.id, req.user.username, 'assign_user', parseInt(id), {
+      await logAction(db, req.user.id, req.user.username, 'assign_user', parseInt(id), {
         assigned_user_id: parseInt(user_id)
       });
 
@@ -94,20 +92,20 @@ function registerAssigneeRoutes(app, requireAuth) {
     const { id, userId } = req.params;
 
     try {
-      const todo = await getById('todos', id);
+      const todo = await db.getById('todos', id);
       if (!todo) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      const assignments = await getAll(TODO_USERS_TABLE, { todo_id: parseInt(id), user_id: parseInt(userId) });
+      const assignments = await db.getAll(TODO_USERS_TABLE, { todo_id: parseInt(id), user_id: parseInt(userId) });
       if (!Array.isArray(assignments) || assignments.length === 0) {
         return res.status(404).json({ error: 'assignment not found' });
       }
 
       const assignment = assignments[0];
-      await remove(TODO_USERS_TABLE, assignment.id);
+      await db.remove(TODO_USERS_TABLE, assignment.id);
 
-      await logAction(req.user.id, req.user.username, 'unassign_user', parseInt(id), {
+      await logAction(db, req.user.id, req.user.username, 'unassign_user', parseInt(id), {
         unassigned_user_id: parseInt(userId)
       });
 
@@ -122,12 +120,12 @@ function registerAssigneeRoutes(app, requireAuth) {
     const { id } = req.params;
 
     try {
-      const todo = await getById('todos', id);
+      const todo = await db.getById('todos', id);
       if (!todo) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      const assignees = await getAssignees(id);
+      const assignees = await getAssignees(db, auth, id);
       res.json(assignees);
     } catch (error) {
       console.error('Get assignees error:', error);
@@ -140,18 +138,18 @@ function registerAssigneeRoutes(app, requireAuth) {
     const { id } = req.params;
 
     try {
-      const users = getAllUsers();
+      const users = auth.getAllUsers();
       const user = users.find(u => u.id === String(id));
       if (!user) {
         return res.status(404).json({ error: 'user not found' });
       }
 
-      const assignments = await getAll(TODO_USERS_TABLE, { user_id: parseInt(id) });
+      const assignments = await db.getAll(TODO_USERS_TABLE, { user_id: parseInt(id) });
       if (!Array.isArray(assignments)) {
         return res.json([]);
       }
 
-      const allTodos = await getAll('todos');
+      const allTodos = await db.getAll('todos');
       const todoList = Array.isArray(allTodos) ? allTodos : [];
 
       const assignedTodoIds = new Set(assignments.map(a => a.todo_id));
