@@ -1,13 +1,12 @@
 
-const { getAll, getById, insert, update, remove } = require('./db');
 const { logAction } = require('./logging');
 const { publishToUser } = require('./notifications');
 const { getAssignees } = require('./assignees');
 
 // Helper to get all comments for a todo (oldest first)
-async function getComments(todoId) {
+async function getComments(db, todoId) {
   try {
-    const comments = await getAll('comments', { todo_id: todoId });
+    const comments = await db.getAll('comments', { todo_id: todoId });
     if (!Array.isArray(comments)) {
       return [];
     }
@@ -20,9 +19,9 @@ async function getComments(todoId) {
   }
 }
 
-async function getCommentCount(todoId) {
+async function getCommentCount(db, todoId) {
   try {
-    const comments = await getComments(todoId);
+    const comments = await getComments(db, todoId);
     return comments.length;
   } catch (error) {
     console.error('Error getting comment count:', error);
@@ -30,7 +29,7 @@ async function getCommentCount(todoId) {
   }
 }
 
-function registerCommentRoutes(app, requireAuth) {
+function registerCommentRoutes(app, requireAuth, db, auth) {
   app.post('/todos/:id/comments', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { body } = req.body;
@@ -44,7 +43,7 @@ function registerCommentRoutes(app, requireAuth) {
     }
 
     try {
-      const todo = await getById('todos', id);
+      const todo = await db.getById('todos', id);
       if (!todo) {
         return res.status(404).json({ error: 'todo not found' });
       }
@@ -59,14 +58,14 @@ function registerCommentRoutes(app, requireAuth) {
         edited: false
       };
 
-      const comment = await insert('comments', commentRecord);
+      const comment = await db.insert('comments', commentRecord);
 
-      await logAction(req.user.id, req.user.username, 'create_comment', parseInt(id), {
+      await logAction(db, req.user.id, req.user.username, 'create_comment', parseInt(id), {
         comment_id: comment.id,
         body: trimmedBody
       });
 
-      const assignees = await getAssignees(parseInt(id));
+      const assignees = await getAssignees(db, auth, parseInt(id));
       const assigneeIds = new Set(assignees.map(a => a.id));
 
       for (const assignee of assignees) {
@@ -99,12 +98,12 @@ function registerCommentRoutes(app, requireAuth) {
     const { id } = req.params;
 
     try {
-      const todo = await getById('todos', id);
+      const todo = await db.getById('todos', id);
       if (!todo) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      const comments = await getComments(id);
+      const comments = await getComments(db, id);
 
       res.json(comments);
     } catch (error) {
@@ -117,12 +116,12 @@ function registerCommentRoutes(app, requireAuth) {
     const { body } = req.body;
 
     try {
-      const todo = await getById('todos', id);
+      const todo = await db.getById('todos', id);
       if (!todo) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      const comment = await getById('comments', commentId);
+      const comment = await db.getById('comments', commentId);
       if (!comment) {
         return res.status(404).json({ error: 'comment not found' });
       }
@@ -146,9 +145,9 @@ function registerCommentRoutes(app, requireAuth) {
         edited: true
       };
 
-      await update('comments', commentId, updatedComment);
+      await db.update('comments', commentId, updatedComment);
 
-      await logAction(req.user.id, req.user.username, 'edit_comment', parseInt(id), {
+      await logAction(db, req.user.id, req.user.username, 'edit_comment', parseInt(id), {
         comment_id: parseInt(commentId)
       });
 
@@ -163,12 +162,12 @@ function registerCommentRoutes(app, requireAuth) {
     const { id, commentId } = req.params;
 
     try {
-      const todo = await getById('todos', id);
+      const todo = await db.getById('todos', id);
       if (!todo) {
         return res.status(404).json({ error: 'todo not found' });
       }
 
-      const comment = await getById('comments', commentId);
+      const comment = await db.getById('comments', commentId);
       if (!comment) {
         return res.status(404).json({ error: 'comment not found' });
       }
@@ -177,9 +176,9 @@ function registerCommentRoutes(app, requireAuth) {
         return res.status(403).json({ error: 'only the comment author may delete this comment' });
       }
 
-      await remove('comments', commentId);
+      await db.remove('comments', commentId);
 
-      await logAction(req.user.id, req.user.username, 'delete_comment', parseInt(id), {
+      await logAction(db, req.user.id, req.user.username, 'delete_comment', parseInt(id), {
         comment_id: parseInt(commentId)
       });
 

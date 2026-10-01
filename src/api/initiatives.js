@@ -1,5 +1,4 @@
 
-const { getAll, getById, insert, update, remove } = require('./db');
 const { logAction } = require('./logging');
 const { publishEvent } = require('./notifications');
 
@@ -23,7 +22,7 @@ const STATUS_DONE = 'done';
 const STATUS_ACTIVE = 'active';
 const STATUS_COMPLETED = 'completed';
 
-function registerInitiativeRoutes(app, requireAuth) {
+function registerInitiativeRoutes(app, requireAuth, db) {
   app.post('/initiatives', requireAuth, async (req, res) => {
     const { name, description, project_ids } = req.body;
 
@@ -40,7 +39,7 @@ function registerInitiativeRoutes(app, requireAuth) {
     }
 
     try {
-      const allProjects = await getAll(PROJECTS_TABLE);
+      const allProjects = await db.getAll(PROJECTS_TABLE);
       const projectMap = {};
       if (Array.isArray(allProjects)) {
         allProjects.forEach(p => {
@@ -73,21 +72,21 @@ function registerInitiativeRoutes(app, requireAuth) {
         completed_at: null
       };
 
-      const initiative = await insert(INITIATIVES_TABLE, initiativeRecord);
+      const initiative = await db.insert(INITIATIVES_TABLE, initiativeRecord);
 
       for (const projectId of project_ids) {
-        await insert('initiative_projects', {
+        await db.insert('initiative_projects', {
           initiative_id: initiative.id,
           project_id: projectId
         });
       }
 
-      await logAction(req.user.id, req.user.username, 'create_initiative', initiative.id, {
+      await logAction(db, req.user.id, req.user.username, 'create_initiative', initiative.id, {
         name: trimmedName,
         project_ids
       });
 
-      const response = await enrichInitiative(initiative);
+      const response = await enrichInitiative(db, initiative);
       res.status(STATUS_CREATED).json(response);
     } catch (error) {
       console.error('Create initiative error:', error);
@@ -97,10 +96,10 @@ function registerInitiativeRoutes(app, requireAuth) {
 
   app.get('/initiatives', requireAuth, async (req, res) => {
     try {
-      const initiatives = await getAll(INITIATIVES_TABLE);
+      const initiatives = await db.getAll(INITIATIVES_TABLE);
       const result = Array.isArray(initiatives) ? initiatives : [];
 
-      const enriched = await Promise.all(result.map(init => enrichInitiative(init)));
+      const enriched = await Promise.all(result.map(init => enrichInitiative(db, init)));
 
       res.json(enriched);
     } catch (error) {
@@ -112,12 +111,12 @@ function registerInitiativeRoutes(app, requireAuth) {
     const { id } = req.params;
 
     try {
-      const initiative = await getById(INITIATIVES_TABLE, id);
+      const initiative = await db.getById(INITIATIVES_TABLE, id);
       if (!initiative) {
         return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
-      const response = await enrichInitiative(initiative);
+      const response = await enrichInitiative(db, initiative);
       res.json(response);
     } catch (error) {
       res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
@@ -128,12 +127,12 @@ function registerInitiativeRoutes(app, requireAuth) {
     const { id } = req.params;
 
     try {
-      const initiative = await getById(INITIATIVES_TABLE, id);
+      const initiative = await db.getById(INITIATIVES_TABLE, id);
       if (!initiative) {
         return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
-      const progress = await calculateProgress(parseInt(id));
+      const progress = await calculateProgress(db, parseInt(id));
       res.json(progress);
     } catch (error) {
       res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
@@ -145,7 +144,7 @@ function registerInitiativeRoutes(app, requireAuth) {
     const { name, description } = req.body;
 
     try {
-      const initiative = await getById(INITIATIVES_TABLE, id);
+      const initiative = await db.getById(INITIATIVES_TABLE, id);
       if (!initiative) {
         return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
@@ -179,9 +178,9 @@ function registerInitiativeRoutes(app, requireAuth) {
 
       initiative.updated_at = new Date().toISOString();
 
-      await update('initiatives', id, initiative);
+      await db.update('initiatives', id, initiative);
 
-      await logAction(req.user.id, req.user.username, 'update_initiative', parseInt(id), changes);
+      await logAction(db, req.user.id, req.user.username, 'update_initiative', parseInt(id), changes);
 
       await publishEvent('initiatives', {
         type: 'initiative.updated',
@@ -189,7 +188,7 @@ function registerInitiativeRoutes(app, requireAuth) {
         by: req.user.username
       });
 
-      const response = await enrichInitiative(initiative);
+      const response = await enrichInitiative(db, initiative);
       res.json(response);
     } catch (error) {
       res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
@@ -201,17 +200,17 @@ function registerInitiativeRoutes(app, requireAuth) {
     const { id } = req.params;
 
     try {
-      const initiative = await getById(INITIATIVES_TABLE, id);
+      const initiative = await db.getById(INITIATIVES_TABLE, id);
       if (!initiative) {
         return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
       try {
-        const allLinks = await getAll(INITIATIVE_PROJECTS_TABLE);
+        const allLinks = await db.getAll(INITIATIVE_PROJECTS_TABLE);
         if (Array.isArray(allLinks)) {
           for (const link of allLinks) {
             if (link.initiative_id === parseInt(id)) {
-              await remove('initiative_projects', link.id);
+              await db.remove('initiative_projects', link.id);
             }
           }
         }
@@ -220,11 +219,11 @@ function registerInitiativeRoutes(app, requireAuth) {
       }
 
       try {
-        const allTodos = await getAll('initiative_todos');
+        const allTodos = await db.getAll('initiative_todos');
         if (Array.isArray(allTodos)) {
           for (const link of allTodos) {
             if (link.initiative_id === parseInt(id)) {
-              await remove('initiative_todos', link.id);
+              await db.remove('initiative_todos', link.id);
             }
           }
         }
@@ -232,10 +231,10 @@ function registerInitiativeRoutes(app, requireAuth) {
         console.error('Error deleting initiative_todos:', error);
       }
 
-      await remove('initiatives', id);
+      await db.remove('initiatives', id);
 
       // Log the action
-      await logAction(req.user.id, req.user.username, 'delete_initiative', parseInt(id), {});
+      await logAction(db, req.user.id, req.user.username, 'delete_initiative', parseInt(id), {});
 
       await publishEvent('initiatives', {
         type: 'initiative.deleted',
@@ -254,17 +253,17 @@ function registerInitiativeRoutes(app, requireAuth) {
     const { project_id } = req.body;
 
     try {
-      const initiative = await getById(INITIATIVES_TABLE, id);
+      const initiative = await db.getById(INITIATIVES_TABLE, id);
       if (!initiative) {
         return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
-      const project = await getById(PROJECTS_TABLE, project_id);
+      const project = await db.getById(PROJECTS_TABLE, project_id);
       if (!project) {
         return res.status(STATUS_NOT_FOUND).json({ error: 'project not found' });
       }
 
-      const allLinks = await getAll(INITIATIVE_PROJECTS_TABLE);
+      const allLinks = await db.getAll(INITIATIVE_PROJECTS_TABLE);
       if (Array.isArray(allLinks)) {
         const exists = allLinks.some(
           l => l.initiative_id === parseInt(id) && l.project_id === parseInt(project_id)
@@ -274,12 +273,12 @@ function registerInitiativeRoutes(app, requireAuth) {
         }
       }
 
-      await insert('initiative_projects', {
+      await db.insert('initiative_projects', {
         initiative_id: parseInt(id),
         project_id: parseInt(project_id)
       });
 
-      await logAction(req.user.id, req.user.username, 'add_initiative_project', parseInt(id), {
+      await logAction(db, req.user.id, req.user.username, 'add_initiative_project', parseInt(id), {
         project_id: parseInt(project_id)
       });
 
@@ -290,7 +289,7 @@ function registerInitiativeRoutes(app, requireAuth) {
         by: req.user.username
       });
 
-      const response = await enrichInitiative(initiative);
+      const response = await enrichInitiative(db, initiative);
       res.status(STATUS_CREATED).json(response);
     } catch (error) {
       console.error('Add project error:', error);
@@ -302,13 +301,13 @@ function registerInitiativeRoutes(app, requireAuth) {
     const { id, projectId } = req.params;
 
     try {
-      const initiative = await getById(INITIATIVES_TABLE, id);
+      const initiative = await db.getById(INITIATIVES_TABLE, id);
       if (!initiative) {
         return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
       // Check that initiative has at least one other project
-      const allLinks = await getAll(INITIATIVE_PROJECTS_TABLE);
+      const allLinks = await db.getAll(INITIATIVE_PROJECTS_TABLE);
       const initiativeProjects = Array.isArray(allLinks)
         ? allLinks.filter(l => l.initiative_id === parseInt(id))
         : [];
@@ -320,7 +319,7 @@ function registerInitiativeRoutes(app, requireAuth) {
       let found = false;
       for (const link of initiativeProjects) {
         if (link.project_id === parseInt(projectId)) {
-          await remove('initiative_projects', link.id);
+          await db.remove('initiative_projects', link.id);
           found = true;
           break;
         }
@@ -330,7 +329,7 @@ function registerInitiativeRoutes(app, requireAuth) {
         return res.status(STATUS_NOT_FOUND).json({ error: 'project not linked to this initiative' });
       }
 
-      await logAction(req.user.id, req.user.username, 'remove_initiative_project', parseInt(id), {
+      await logAction(db, req.user.id, req.user.username, 'remove_initiative_project', parseInt(id), {
         project_id: parseInt(projectId)
       });
 
@@ -352,17 +351,17 @@ function registerInitiativeRoutes(app, requireAuth) {
     const { todo_id } = req.body;
 
     try {
-      const initiative = await getById(INITIATIVES_TABLE, id);
+      const initiative = await db.getById(INITIATIVES_TABLE, id);
       if (!initiative) {
         return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
-      const todo = await getById(TODOS_TABLE, todo_id);
+      const todo = await db.getById(TODOS_TABLE, todo_id);
       if (!todo) {
         return res.status(STATUS_NOT_FOUND).json({ error: 'todo not found' });
       }
 
-      const allInitiativeProjects = await getAll('initiative_projects');
+      const allInitiativeProjects = await db.getAll('initiative_projects');
       const initiativeProjectIds = Array.isArray(allInitiativeProjects)
         ? allInitiativeProjects
             .filter(l => l.initiative_id === parseInt(id))
@@ -376,7 +375,7 @@ function registerInitiativeRoutes(app, requireAuth) {
         });
       }
 
-      const allInitiativeTodos = await getAll(INITIATIVE_TODOS_TABLE);
+      const allInitiativeTodos = await db.getAll(INITIATIVE_TODOS_TABLE);
       if (Array.isArray(allInitiativeTodos)) {
         const alreadyLinked = allInitiativeTodos.some(
           l => l.todo_id === parseInt(todo_id)
@@ -386,18 +385,18 @@ function registerInitiativeRoutes(app, requireAuth) {
         }
       }
 
-      await insert('initiative_todos', {
+      await db.insert('initiative_todos', {
         initiative_id: parseInt(id),
         todo_id: parseInt(todo_id)
       });
 
-      await logAction(req.user.id, req.user.username, 'add_initiative_todo', parseInt(id), {
+      await logAction(db, req.user.id, req.user.username, 'add_initiative_todo', parseInt(id), {
         todo_id: parseInt(todo_id)
       });
 
-      await recalculateInitiativeForTodo(parseInt(todo_id));
+      await recalculateInitiativeForTodo(db, parseInt(todo_id));
 
-      const response = await enrichInitiative(initiative);
+      const response = await enrichInitiative(db, initiative);
       res.status(STATUS_CREATED).json(response);
     } catch (error) {
       console.error('Add todo error:', error);
@@ -409,17 +408,17 @@ function registerInitiativeRoutes(app, requireAuth) {
     const { id, todoId } = req.params;
 
     try {
-      const initiative = await getById(INITIATIVES_TABLE, id);
+      const initiative = await db.getById(INITIATIVES_TABLE, id);
       if (!initiative) {
         return res.status(STATUS_NOT_FOUND).json({ error: ERROR_INITIATIVE_NOT_FOUND });
       }
 
-      const allInitiativeTodos = await getAll(INITIATIVE_TODOS_TABLE);
+      const allInitiativeTodos = await db.getAll(INITIATIVE_TODOS_TABLE);
       let found = false;
       if (Array.isArray(allInitiativeTodos)) {
         for (const link of allInitiativeTodos) {
           if (link.initiative_id === parseInt(id) && link.todo_id === parseInt(todoId)) {
-            await remove('initiative_todos', link.id);
+            await db.remove('initiative_todos', link.id);
             found = true;
             break;
           }
@@ -430,7 +429,7 @@ function registerInitiativeRoutes(app, requireAuth) {
         return res.status(STATUS_NOT_FOUND).json({ error: 'todo not linked to this initiative' });
       }
 
-      await logAction(req.user.id, req.user.username, 'remove_initiative_todo', parseInt(id), {
+      await logAction(db, req.user.id, req.user.username, 'remove_initiative_todo', parseInt(id), {
         todo_id: parseInt(todoId)
       });
 
@@ -448,9 +447,9 @@ function registerInitiativeRoutes(app, requireAuth) {
   });
 }
 
-async function enrichInitiative(initiative) {
-  const projects = await getInitiativeProjects(initiative.id);
-  const progress = await calculateProgress(initiative.id);
+async function enrichInitiative(db, initiative) {
+  const projects = await getInitiativeProjects(db, initiative.id);
+  const progress = await calculateProgress(db, initiative.id);
 
   return {
     ...initiative,
@@ -461,10 +460,10 @@ async function enrichInitiative(initiative) {
   };
 }
 
-async function getInitiativeProjects(initiativeId) {
+async function getInitiativeProjects(db, initiativeId) {
   try {
-    const allProjects = await getAll('projects');
-    const allLinks = await getAll(INITIATIVE_PROJECTS_TABLE);
+    const allProjects = await db.getAll('projects');
+    const allLinks = await db.getAll(INITIATIVE_PROJECTS_TABLE);
 
     if (!Array.isArray(allLinks)) {
       return [];
@@ -487,10 +486,10 @@ async function getInitiativeProjects(initiativeId) {
   }
 }
 
-async function calculateProgress(initiativeId) {
+async function calculateProgress(db, initiativeId) {
   try {
-    const allInitiativeTodos = await getAll(INITIATIVE_TODOS_TABLE);
-    const allTodos = await getAll(TODOS_TABLE);
+    const allInitiativeTodos = await db.getAll(INITIATIVE_TODOS_TABLE);
+    const allTodos = await db.getAll(TODOS_TABLE);
 
     const todoIds = Array.isArray(allInitiativeTodos)
       ? allInitiativeTodos
@@ -532,9 +531,9 @@ async function calculateProgress(initiativeId) {
   }
 }
 
-async function recalculateInitiativeForTodo(todoId) {
+async function recalculateInitiativeForTodo(db, todoId) {
   try {
-    const allInitiativeTodos = await getAll(INITIATIVE_TODOS_TABLE);
+    const allInitiativeTodos = await db.getAll(INITIATIVE_TODOS_TABLE);
     if (!Array.isArray(allInitiativeTodos)) {
       return;
     }
@@ -545,12 +544,12 @@ async function recalculateInitiativeForTodo(todoId) {
     }
 
     const initiativeId = initiativeTodoLink.initiative_id;
-    const initiative = await getById('initiatives', initiativeId);
+    const initiative = await db.getById('initiatives', initiativeId);
     if (!initiative) {
       return;
     }
 
-    const progress = await calculateProgress(initiativeId);
+    const progress = await calculateProgress(db, initiativeId);
 
     let newStatus = 'active';
     let completedAt = null;
@@ -563,7 +562,7 @@ async function recalculateInitiativeForTodo(todoId) {
       initiative.status = newStatus;
       initiative.completed_at = completedAt;
       initiative.updated_at = new Date().toISOString();
-      await update(INITIATIVES_TABLE, initiativeId, initiative);
+      await db.update(INITIATIVES_TABLE, initiativeId, initiative);
 
       if (newStatus === 'completed') {
         await publishEvent('initiatives', {

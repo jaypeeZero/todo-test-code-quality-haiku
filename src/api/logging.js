@@ -1,7 +1,6 @@
 
-const { insert } = require('./db');
 
-async function logAction(userId, username, action, todoId = null, details = null) {
+async function logAction(db, userId, username, action, todoId = null, details = null) {
   const timestamp = new Date().toISOString();
   const logRecord = {
     user_id: userId,
@@ -12,7 +11,7 @@ async function logAction(userId, username, action, todoId = null, details = null
     details: details || {}
   };
   try {
-    await insert('user_logs', logRecord);
+    await db.insert('user_logs', logRecord);
   } catch (error) {
     console.error('Failed to log action:', error);
     throw error;

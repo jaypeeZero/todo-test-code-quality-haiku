@@ -1,13 +1,11 @@
 // V2 API with pagination and new status vocabulary
 
-const { getAll, getById, insert, update, getDatabaseName } = require('./db');
 const { logAction } = require('./logging');
 const { getRelations } = require('./links');
 const { getBlockers, isBlocked } = require('./blockers');
 const { getComments, getCommentCount } = require('./comments');
 const { getAssignees } = require('./assignees');
 const { publishEvent, sendNotification, publishToUser } = require('./notifications');
-const { getCurrentProject } = require('./auth');
 const { recalculateInitiativeForTodo } = require('./initiatives');
 
 const STATUS_OPEN = 'open';
@@ -36,12 +34,12 @@ function statusFromV2(status) {
   return STATUS_OPEN;
 }
 
-async function getProjectInfo(projectId) {
+async function getProjectInfo(db, projectId) {
   if (!projectId) {
     return null;
   }
   try {
-    const project = await getById('projects', projectId);
+    const project = await db.getById('projects', projectId);
     if (project) {
       return { id: project.id, name: project.name };
     }
@@ -59,9 +57,9 @@ function isOverdue(todo) {
   return todo.due_date < today;
 }
 
-async function getInitiativeForTodo(todoId) {
+async function getInitiativeForTodo(db, todoId) {
   try {
-    const allInitiativeTodos = await getAll('initiative_todos');
+    const allInitiativeTodos = await db.getAll('initiative_todos');
     if (!Array.isArray(allInitiativeTodos)) {
       return null;
     }
@@ -69,7 +67,7 @@ async function getInitiativeForTodo(todoId) {
     if (!initiativeTodo) {
       return null;
     }
-    const initiative = await getById('initiatives', initiativeTodo.initiative_id);
+    const initiative = await db.getById('initiatives', initiativeTodo.initiative_id);
     if (initiative) {
       return { id: initiative.id, name: initiative.name };
     }
@@ -81,12 +79,12 @@ async function getInitiativeForTodo(todoId) {
 }
 
 // Helper to enrich a todo with v2-specific fields
-async function enrichTodoV2(todo) {
-  const blocked = await isBlocked(todo.id);
-  const comment_count = await getCommentCount(todo.id);
-  const assignees = await getAssignees(todo.id);
-  const project = await getProjectInfo(todo.project_id);
-  const initiative = await getInitiativeForTodo(todo.id);
+async function enrichTodoV2(db, auth, todo) {
+  const blocked = await isBlocked(db, todo.id);
+  const comment_count = await getCommentCount(db, todo.id);
+  const assignees = await getAssignees(db, auth, todo.id);
+  const project = await getProjectInfo(db, todo.project_id);
+  const initiative = await getInitiativeForTodo(db, todo.id);
 
   return {
     id: todo.id,
@@ -125,7 +123,7 @@ function wrapV2Response(data, meta = {}) {
   };
 }
 
-function registerV2Routes(app, requireAuth) {
+function registerV2Routes(app, requireAuth, db, auth) {
   app.get('/api/v2/todos', requireAuth, async (req, res) => {
     const { page = 1, page_size = 20, status, priority, project_id, assigned_to, overdue, include_archived, sort, order } = req.query;
 
@@ -141,7 +139,7 @@ function registerV2Routes(app, requireAuth) {
       }
 
       // Fetch all todos (we'll handle filtering in-memory)
-      const todos = await getAll('todos');
+      const todos = await db.getAll('todos');
 
       if (!Array.isArray(todos)) {
         const meta = {
@@ -161,7 +159,7 @@ function registerV2Routes(app, requireAuth) {
 
       const todosWithEnrichment = [];
       for (const todo of filtered) {
-        const enriched = await enrichTodoV2(todo);
+        const enriched = await enrichTodoV2(db, auth, todo);
         todosWithEnrichment.push(enriched);
       }
 
@@ -231,7 +229,7 @@ function registerV2Routes(app, requireAuth) {
         });
       }
 
-      await logAction(req.user.id, req.user.username, 'list_todos', null, {});
+      await logAction(db, req.user.id, req.user.username, 'list_todos', null, {});
 
       const total = result.length;
       const total_pages = Math.ceil(total / pageSizeNum);
@@ -257,25 +255,25 @@ function registerV2Routes(app, requireAuth) {
     const { id } = req.params;
 
     try {
-      const todo = await getById('todos', id);
+      const todo = await db.getById('todos', id);
       if (!todo) {
         return res.status(404).json(wrapV2Response(null, { error: 'todo not found' }));
       }
 
-      await logAction(req.user.id, req.user.username, 'view_todo', id, {});
+      await logAction(db, req.user.id, req.user.username, 'view_todo', id, {});
 
-      const relations = await getRelations(id);
+      const relations = await getRelations(db, id);
 
-      const blocked_by = await getBlockers(id);
-      const blocked = await isBlocked(id);
+      const blocked_by = await getBlockers(db, id);
+      const blocked = await isBlocked(db, id);
 
-      const comments = await getComments(id);
+      const comments = await getComments(db, id);
 
-      const assignees = await getAssignees(id);
+      const assignees = await getAssignees(db, auth, id);
 
-      const project = await getProjectInfo(todo.project_id);
+      const project = await getProjectInfo(db, todo.project_id);
 
-      const initiative = await getInitiativeForTodo(id);
+      const initiative = await getInitiativeForTodo(db, id);
 
       const response = {
         id: todo.id,
@@ -348,7 +346,7 @@ function registerV2Routes(app, requireAuth) {
     let assignedProjectId = null;
     if (project_id !== undefined && project_id !== null) {
       try {
-        const project = await getById('projects', project_id);
+        const project = await db.getById('projects', project_id);
         if (!project) {
           return res.status(404).json(wrapV2Response(null, { error: 'project not found' }));
         }
@@ -357,7 +355,7 @@ function registerV2Routes(app, requireAuth) {
       }
       assignedProjectId = project_id;
     } else {
-      const currentProject = getCurrentProject(req.user.id);
+      const currentProject = auth.getCurrentProject(req.user.id);
       if (currentProject) {
         assignedProjectId = currentProject;
       }
@@ -381,9 +379,9 @@ function registerV2Routes(app, requireAuth) {
     };
 
     try {
-      const todo = await insert('todos', todoRecord);
+      const todo = await db.insert('todos', todoRecord);
 
-      await logAction(req.user.id, req.user.username, 'create_todo', todo.id, {
+      await logAction(db, req.user.id, req.user.username, 'create_todo', todo.id, {
         title: trimmedTitle,
         description: trimmedDescription || null,
         project_id: assignedProjectId
@@ -395,7 +393,7 @@ function registerV2Routes(app, requireAuth) {
         by: req.user.username
       });
 
-      const enriched = await enrichTodoV2(todo);
+      const enriched = await enrichTodoV2(db, auth, todo);
       res.status(201).json(wrapV2Response(enriched));
     } catch (error) {
       console.error('Create todo error:', error);
@@ -408,7 +406,7 @@ function registerV2Routes(app, requireAuth) {
     const { title, description, status, project_id, due_date, priority } = req.body;
 
     try {
-      const todo = await getById('todos', id);
+      const todo = await db.getById('todos', id);
       if (!todo) {
         return res.status(404).json(wrapV2Response(null, { error: 'todo not found' }));
       }
@@ -455,9 +453,9 @@ function registerV2Routes(app, requireAuth) {
 
       // Check if trying to mark as completed while blocked
       if (status && statusFromV2(status) === 'done' && statusFromV2(status) !== todo.status) {
-        const blocked = await isBlocked(id);
+        const blocked = await isBlocked(db, id);
         if (blocked) {
-          const blockers = await getBlockers(id);
+          const blockers = await getBlockers(db, id);
           const blockerIds = blockers.map(b => b.id);
           return res.status(409).json(wrapV2Response(null, { error: 'todo is blocked', blocked_by: blockerIds }));
         }
@@ -491,7 +489,7 @@ function registerV2Routes(app, requireAuth) {
 
       if (project_id !== undefined && project_id !== todo.project_id) {
         if (project_id !== null) {
-          const project = await getById('projects', project_id);
+          const project = await db.getById('projects', project_id);
           if (!project) {
             return res.status(404).json(wrapV2Response(null, { error: 'project not found' }));
           }
@@ -512,14 +510,14 @@ function registerV2Routes(app, requireAuth) {
 
       todo.updated_at = new Date().toISOString();
 
-      await update('todos', id, todo);
+      await db.update('todos', id, todo);
 
       // Recalculate initiative if status changed
       if (changes.status) {
-        await recalculateInitiativeForTodo(parseInt(id));
+        await recalculateInitiativeForTodo(db, parseInt(id));
       }
 
-      await logAction(req.user.id, req.user.username, 'update_todo', id, changes);
+      await logAction(db, req.user.id, req.user.username, 'update_todo', id, changes);
 
       await publishEvent('todos', {
         type: 'todo.updated',
@@ -528,8 +526,8 @@ function registerV2Routes(app, requireAuth) {
       });
 
       if (changes.status && changes.status.to === 'done') {
-        const assignees = await getAssignees(id);
-        const databaseName = getDatabaseName();
+        const assignees = await getAssignees(db, auth, id);
+        const databaseName = db.getDatabaseName();
         for (const assignee of assignees) {
           await sendNotification(
             assignee.username,
@@ -544,7 +542,7 @@ function registerV2Routes(app, requireAuth) {
         }
       }
 
-      const enriched = await enrichTodoV2(todo);
+      const enriched = await enrichTodoV2(db, auth, todo);
       res.json(wrapV2Response(enriched));
     } catch (error) {
       res.status(404).json(wrapV2Response(null, { error: 'todo not found' }));
@@ -561,7 +559,7 @@ function registerV2Routes(app, requireAuth) {
     }
 
     try {
-      const todo = await getById('todos', id);
+      const todo = await db.getById('todos', id);
       if (!todo) {
         return res.status(404).json(wrapV2Response(null, { error: 'todo not found' }));
       }
@@ -574,9 +572,9 @@ function registerV2Routes(app, requireAuth) {
 
       // Check if trying to mark as completed while blocked
       if (newStorageStatus === 'done') {
-        const blocked = await isBlocked(id);
+        const blocked = await isBlocked(db, id);
         if (blocked) {
-          const blockers = await getBlockers(id);
+          const blockers = await getBlockers(db, id);
           const blockerIds = blockers.map(b => b.id);
           return res.status(409).json(wrapV2Response(null, { error: 'todo is blocked', blocked_by: blockerIds }));
         }
@@ -592,15 +590,15 @@ function registerV2Routes(app, requireAuth) {
 
       todo.updated_at = new Date().toISOString();
 
-      await update('todos', id, todo);
+      await db.update('todos', id, todo);
 
-      await recalculateInitiativeForTodo(parseInt(id));
+      await recalculateInitiativeForTodo(db, parseInt(id));
 
-      await logAction(req.user.id, req.user.username, 'update_todo', id, { status: newStorageStatus });
+      await logAction(db, req.user.id, req.user.username, 'update_todo', id, { status: newStorageStatus });
 
       if (newStorageStatus === 'done') {
-        const assignees = await getAssignees(id);
-        const databaseName = getDatabaseName();
+        const assignees = await getAssignees(db, auth, id);
+        const databaseName = db.getDatabaseName();
         for (const assignee of assignees) {
           await sendNotification(
             assignee.username,
@@ -615,7 +613,7 @@ function registerV2Routes(app, requireAuth) {
         }
       }
 
-      const enriched = await enrichTodoV2(todo);
+      const enriched = await enrichTodoV2(db, auth, todo);
       res.json(wrapV2Response(enriched));
     } catch (error) {
       console.error('Update status error:', error);
@@ -628,7 +626,7 @@ function registerV2Routes(app, requireAuth) {
     const { page = 1, page_size = 20, status, priority, assigned_to, overdue, include_archived, sort, order } = req.query;
 
     try {
-      const project = await getById('projects', project_id);
+      const project = await db.getById('projects', project_id);
       if (!project) {
         return res.status(404).json(wrapV2Response(null, { error: 'project not found' }));
       }
@@ -643,7 +641,7 @@ function registerV2Routes(app, requireAuth) {
         pageNum = 1;
       }
 
-      const todos = await getAll('todos');
+      const todos = await db.getAll('todos');
 
       if (!Array.isArray(todos)) {
         const meta = {
@@ -663,7 +661,7 @@ function registerV2Routes(app, requireAuth) {
 
       const todosWithEnrichment = [];
       for (const todo of filtered) {
-        const enriched = await enrichTodoV2(todo);
+        const enriched = await enrichTodoV2(db, auth, todo);
         todosWithEnrichment.push(enriched);
       }
 
@@ -722,7 +720,7 @@ function registerV2Routes(app, requireAuth) {
         });
       }
 
-      await logAction(req.user.id, req.user.username, 'list_project_todos', null, { project_id });
+      await logAction(db, req.user.id, req.user.username, 'list_project_todos', null, { project_id });
 
       const total = result.length;
       const total_pages = Math.ceil(total / pageSizeNum);

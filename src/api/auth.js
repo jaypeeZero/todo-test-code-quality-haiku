@@ -19,19 +19,24 @@ function generateToken() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-function createAuth() {
-  const tokenMap = new Map();
-  const currentProjects = new Map();
-  const userString = process.env.APP_USERS || 'alice:password1,bob:password2,carol:password3';
-  const users = parseUsers(userString);
+class Auth {
+  #tokenMap;
+  #currentProjects;
+  #users;
 
-  function login(username, password) {
-    const user = users.find(u => u.username === username && u.password === password);
+  constructor(users) {
+    this.#tokenMap = new Map();
+    this.#currentProjects = new Map();
+    this.#users = users;
+  }
+
+  login(username, password) {
+    const user = this.#users.find(u => u.username === username && u.password === password);
     if (!user) {
       return null;
     }
     const token = generateToken();
-    tokenMap.set(token, { id: user.id, username: user.username });
+    this.#tokenMap.set(token, { id: user.id, username: user.username });
     return {
       token,
       user: {
@@ -41,22 +46,22 @@ function createAuth() {
     };
   }
 
-  function logout(token) {
-    tokenMap.delete(token);
+  logout(token) {
+    this.#tokenMap.delete(token);
   }
 
-  function getUserByToken(token) {
-    return tokenMap.get(token);
+  getUserByToken(token) {
+    return this.#tokenMap.get(token);
   }
 
-  function getAllUsers() {
-    return users.map(u => ({
+  getAllUsers() {
+    return this.#users.map(u => ({
       id: u.id,
       username: u.username
     }));
   }
 
-  function requireAuth(req, res, next) {
+  requireAuth(req, res, next) {
     const authHeader = req.headers.authorization;
     if (!authHeader) {
       return res.status(401).json({ error: 'missing token' });
@@ -66,7 +71,7 @@ function createAuth() {
       return res.status(401).json({ error: 'invalid token format' });
     }
     const token = match[1];
-    const user = getUserByToken(token);
+    const user = this.getUserByToken(token);
     if (!user) {
       return res.status(401).json({ error: 'unknown token' });
     }
@@ -74,38 +79,17 @@ function createAuth() {
     next();
   }
 
-  function getCurrentProject(userId) {
-    return currentProjects.get(userId) || null;
+  getCurrentProject(userId) {
+    return this.#currentProjects.get(userId) || null;
   }
 
-  function setCurrentProject(userId, projectId) {
+  setCurrentProject(userId, projectId) {
     if (projectId === null || projectId === undefined) {
-      currentProjects.delete(userId);
+      this.#currentProjects.delete(userId);
     } else {
-      currentProjects.set(userId, projectId);
+      this.#currentProjects.set(userId, projectId);
     }
   }
-
-  return {
-    login,
-    logout,
-    getUserByToken,
-    getAllUsers,
-    requireAuth,
-    getCurrentProject,
-    setCurrentProject
-  };
 }
 
-const authInstance = createAuth();
-
-module.exports = {
-  createAuth,
-  login: (username, password) => authInstance.login(username, password),
-  logout: (token) => authInstance.logout(token),
-  getUserByToken: (token) => authInstance.getUserByToken(token),
-  getAllUsers: () => authInstance.getAllUsers(),
-  requireAuth: (req, res, next) => authInstance.requireAuth(req, res, next),
-  getCurrentProject: (userId) => authInstance.getCurrentProject(userId),
-  setCurrentProject: (userId, projectId) => authInstance.setCurrentProject(userId, projectId)
-};
+module.exports = { Auth, parseUsers };

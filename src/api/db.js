@@ -1,25 +1,27 @@
 // Database module for communicating with the fake database service over HTTP
 
-function createDbModule() {
-  let baseURL;
-  let databaseName;
+class Db {
+  #baseURL;
+  #databaseName;
 
-  if (process.env.DATABASE_URL) {
-    baseURL = process.env.DATABASE_URL;
-    databaseName = 'custom';
-  } else {
-    const databaseKind = process.env.DATABASE_KIND || 'memory';
-    if (databaseKind === 'file') {
-      baseURL = 'http://localhost:4003';
-      databaseName = 'file';
+  constructor() {
+    if (process.env.DATABASE_URL) {
+      this.#baseURL = process.env.DATABASE_URL;
+      this.#databaseName = 'custom';
     } else {
-      baseURL = 'http://localhost:4001';
-      databaseName = 'memory';
+      const databaseKind = process.env.DATABASE_KIND || 'memory';
+      if (databaseKind === 'file') {
+        this.#baseURL = 'http://localhost:4003';
+        this.#databaseName = 'file';
+      } else {
+        this.#baseURL = 'http://localhost:4001';
+        this.#databaseName = 'memory';
+      }
     }
   }
 
-  async function makeRequest(method, path, body = null) {
-    const url = `${baseURL}${path}`;
+  async makeRequest(method, path, body = null) {
+    const url = `${this.#baseURL}${path}`;
     const options = {
       method,
       headers: {
@@ -36,57 +38,38 @@ function createDbModule() {
     return response.json();
   }
 
-  async function getAll(table, filters = {}) {
+  async getAll(table, filters = {}) {
     const params = new URLSearchParams();
     Object.entries(filters).forEach(([key, value]) => {
       params.append(key, value);
     });
     const query = params.toString() ? `?${params.toString()}` : '';
-    return makeRequest('GET', `/tables/${table}${query}`);
+    return this.makeRequest('GET', `/tables/${table}${query}`);
   }
 
-  async function getById(table, id) {
-    return makeRequest('GET', `/tables/${table}/${id}`);
+  async getById(table, id) {
+    return this.makeRequest('GET', `/tables/${table}/${id}`);
   }
 
-  async function insert(table, record) {
-    return makeRequest('POST', `/tables/${table}`, record);
+  async insert(table, record) {
+    return this.makeRequest('POST', `/tables/${table}`, record);
   }
 
-  async function update(table, id, record) {
-    return makeRequest('PUT', `/tables/${table}/${id}`, record);
+  async update(table, id, record) {
+    return this.makeRequest('PUT', `/tables/${table}/${id}`, record);
   }
 
-  async function remove(table, id) {
-    return makeRequest('DELETE', `/tables/${table}/${id}`);
+  async remove(table, id) {
+    return this.makeRequest('DELETE', `/tables/${table}/${id}`);
   }
 
-  function getDatabaseName() {
-    return databaseName;
+  getDatabaseName() {
+    return this.#databaseName;
   }
 
-  return {
-    getAll,
-    getById,
-    insert,
-    update,
-    remove,
-    getDatabaseName,
-    baseURL
-  };
+  getBaseURL() {
+    return this.#baseURL;
+  }
 }
 
-const dbInstance = createDbModule();
-
-module.exports = {
-  createDbModule,
-  getAll: (table, filters) => dbInstance.getAll(table, filters),
-  getById: (table, id) => dbInstance.getById(table, id),
-  insert: (table, record) => dbInstance.insert(table, record),
-  update: (table, id, record) => dbInstance.update(table, id, record),
-  remove: (table, id) => dbInstance.remove(table, id),
-  getDatabaseName: () => dbInstance.getDatabaseName(),
-  get baseURL() {
-    return dbInstance.baseURL;
-  }
-};
+module.exports = { Db };
