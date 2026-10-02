@@ -1,6 +1,5 @@
 
 const { logAction } = require('./logging');
-const { publishToUser } = require('./notifications');
 const { getAssignees } = require('./assignees');
 
 // Helper to get all comments for a todo (oldest first)
@@ -29,7 +28,7 @@ async function getCommentCount(db, todoId) {
   }
 }
 
-function registerCommentRoutes(app, requireAuth, db, auth) {
+function registerCommentRoutes(app, requireAuth, db, auth, notifications) {
   app.post('/todos/:id/comments', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { body } = req.body;
@@ -69,7 +68,7 @@ function registerCommentRoutes(app, requireAuth, db, auth) {
       const assigneeIds = new Set(assignees.map(a => a.id));
 
       for (const assignee of assignees) {
-        await publishToUser(assignee.id, {
+        await notifications.publishToUser(assignee.id, {
           type: 'comment.created',
           todo_id: parseInt(id),
           comment,
@@ -79,7 +78,7 @@ function registerCommentRoutes(app, requireAuth, db, auth) {
 
       // Publish to todo creator if not already an assignee
       if (!assigneeIds.has(todo.created_by)) {
-        await publishToUser(todo.created_by, {
+        await notifications.publishToUser(todo.created_by, {
           type: 'comment.created',
           todo_id: parseInt(id),
           comment,

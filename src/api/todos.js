@@ -5,7 +5,6 @@ const { getRelations } = require('./links');
 const { getBlockers, isBlocked } = require('./blockers');
 const { getComments, getCommentCount } = require('./comments');
 const { getAssignees } = require('./assignees');
-const { publishEvent, sendNotification, publishToUser } = require('./notifications');
 const { recalculateInitiativeForTodo } = require('./initiatives');
 
 const PROJECTS_TABLE = 'projects';
@@ -57,7 +56,7 @@ async function getInitiativeForTodo(db, todoId) {
   return null;
 }
 
-function registerTodoRoutes(app, requireAuth, db, auth) {
+function registerTodoRoutes(app, requireAuth, db, auth, notifications) {
   app.post('/todos', requireAuth, async (req, res) => {
     const { title, description, status, project_id, due_date, priority } = req.body;
 
@@ -139,7 +138,7 @@ function registerTodoRoutes(app, requireAuth, db, auth) {
         project_id: assignedProjectId
       });
 
-      await publishEvent('todos', {
+      await notifications.publishEvent('todos', {
         type: 'todo.created',
         todo,
         by: req.user.username
@@ -539,12 +538,12 @@ function registerTodoRoutes(app, requireAuth, db, auth) {
 
       // Recalculate initiative if status changed
       if (changes.status) {
-        await recalculateInitiativeForTodo(db, parseInt(id));
+        await recalculateInitiativeForTodo(db, notifications, parseInt(id));
       }
 
       await logAction(db, req.user.id, req.user.username, 'update_todo', id, changes);
 
-      await publishEvent('todos', {
+      await notifications.publishEvent('todos', {
         type: 'todo.updated',
         todo,
         by: req.user.username
@@ -554,12 +553,12 @@ function registerTodoRoutes(app, requireAuth, db, auth) {
         const assignees = await getAssignees(db, auth, id);
         const databaseName = db.getDatabaseName();
         for (const assignee of assignees) {
-          await sendNotification(
+          await notifications.sendNotification(
             assignee.username,
             `Todo completed: ${todo.title}`,
             `${todo.title} was completed by ${req.user.username} against the ${databaseName} database`
           );
-          await publishToUser(assignee.id, {
+          await notifications.publishToUser(assignee.id, {
             type: 'todo.completed',
             todo,
             database: databaseName
@@ -629,7 +628,7 @@ function registerTodoRoutes(app, requireAuth, db, auth) {
 
       await logAction(db, req.user.id, req.user.username, 'delete_todo', id, {});
 
-      await publishEvent('todos', {
+      await notifications.publishEvent('todos', {
         type: 'todo.deleted',
         todo,
         by: req.user.username
@@ -667,19 +666,19 @@ function registerTodoRoutes(app, requireAuth, db, auth) {
 
       await db.update('todos', id, todo);
 
-      await recalculateInitiativeForTodo(db, parseInt(id));
+      await recalculateInitiativeForTodo(db, notifications, parseInt(id));
 
       await logAction(db, req.user.id, req.user.username, 'complete_todo', id, {});
 
       const assignees = await getAssignees(db, auth, id);
       const databaseName = db.getDatabaseName();
       for (const assignee of assignees) {
-        await sendNotification(
+        await notifications.sendNotification(
           assignee.username,
           `Todo completed: ${todo.title}`,
           `${todo.title} was completed by ${req.user.username} against the ${databaseName} database`
         );
-        await publishToUser(assignee.id, {
+        await notifications.publishToUser(assignee.id, {
           type: 'todo.completed',
           todo,
           database: databaseName
@@ -758,7 +757,7 @@ function registerTodoRoutes(app, requireAuth, db, auth) {
 
       await logAction(db, req.user.id, req.user.username, 'restore_todo', id, {});
 
-      await publishEvent('todos', {
+      await notifications.publishEvent('todos', {
         type: 'todo.restored',
         todo,
         by: req.user.username
