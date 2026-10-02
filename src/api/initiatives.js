@@ -1,6 +1,5 @@
 
 const { logAction } = require('./logging');
-const { publishEvent } = require('./notifications');
 
 const INITIATIVES_TABLE = 'initiatives';
 const INITIATIVE_PROJECTS_TABLE = 'initiative_projects';
@@ -22,7 +21,7 @@ const STATUS_DONE = 'done';
 const STATUS_ACTIVE = 'active';
 const STATUS_COMPLETED = 'completed';
 
-function registerInitiativeRoutes(app, requireAuth, db) {
+function registerInitiativeRoutes(app, requireAuth, db, notifications) {
   app.post('/initiatives', requireAuth, async (req, res) => {
     const { name, description, project_ids } = req.body;
 
@@ -182,7 +181,7 @@ function registerInitiativeRoutes(app, requireAuth, db) {
 
       await logAction(db, req.user.id, req.user.username, 'update_initiative', parseInt(id), changes);
 
-      await publishEvent('initiatives', {
+      await notifications.publishEvent('initiatives', {
         type: 'initiative.updated',
         initiative,
         by: req.user.username
@@ -236,7 +235,7 @@ function registerInitiativeRoutes(app, requireAuth, db) {
       // Log the action
       await logAction(db, req.user.id, req.user.username, 'delete_initiative', parseInt(id), {});
 
-      await publishEvent('initiatives', {
+      await notifications.publishEvent('initiatives', {
         type: 'initiative.deleted',
         initiative,
         by: req.user.username
@@ -282,7 +281,7 @@ function registerInitiativeRoutes(app, requireAuth, db) {
         project_id: parseInt(project_id)
       });
 
-      await publishEvent('initiatives', {
+      await notifications.publishEvent('initiatives', {
         type: 'initiative.project_added',
         initiative_id: parseInt(id),
         project_id: parseInt(project_id),
@@ -333,7 +332,7 @@ function registerInitiativeRoutes(app, requireAuth, db) {
         project_id: parseInt(projectId)
       });
 
-      await publishEvent('initiatives', {
+      await notifications.publishEvent('initiatives', {
         type: 'initiative.project_removed',
         initiative_id: parseInt(id),
         project_id: parseInt(projectId),
@@ -394,7 +393,7 @@ function registerInitiativeRoutes(app, requireAuth, db) {
         todo_id: parseInt(todo_id)
       });
 
-      await recalculateInitiativeForTodo(db, parseInt(todo_id));
+      await recalculateInitiativeForTodo(db, notifications, parseInt(todo_id));
 
       const response = await enrichInitiative(db, initiative);
       res.status(STATUS_CREATED).json(response);
@@ -433,7 +432,7 @@ function registerInitiativeRoutes(app, requireAuth, db) {
         todo_id: parseInt(todoId)
       });
 
-      await publishEvent('initiatives', {
+      await notifications.publishEvent('initiatives', {
         type: 'initiative.todo_removed',
         initiative_id: parseInt(id),
         todo_id: parseInt(todoId),
@@ -531,7 +530,7 @@ async function calculateProgress(db, initiativeId) {
   }
 }
 
-async function recalculateInitiativeForTodo(db, todoId) {
+async function recalculateInitiativeForTodo(db, notifications, todoId) {
   try {
     const allInitiativeTodos = await db.getAll(INITIATIVE_TODOS_TABLE);
     if (!Array.isArray(allInitiativeTodos)) {
@@ -565,7 +564,7 @@ async function recalculateInitiativeForTodo(db, todoId) {
       await db.update(INITIATIVES_TABLE, initiativeId, initiative);
 
       if (newStatus === 'completed') {
-        await publishEvent('initiatives', {
+        await notifications.publishEvent('initiatives', {
           type: 'initiative.completed',
           initiative_id: initiativeId,
           total: progress.total,
@@ -577,7 +576,7 @@ async function recalculateInitiativeForTodo(db, todoId) {
     }
 
     // Always publish progress event
-    await publishEvent('initiatives', {
+    await notifications.publishEvent('initiatives', {
       type: 'initiative.progress',
       initiative_id: initiativeId,
       total: progress.total,

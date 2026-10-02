@@ -1,95 +1,163 @@
+const CONTENT_TYPE_JSON = 'application/json'
+const CONTENT_TYPE_HEADER = 'Content-Type'
+const API_KEY_HEADER = 'x-api-key'
+const METHOD_POST = 'POST'
+const METHOD_GET = 'GET'
 
-const NOTIFICATIONS_URL = process.env.NOTIFICATIONS_URL || 'http://localhost:4002';
-const NOTIFICATIONS_ENABLED = process.env.NOTIFICATIONS_ENABLED !== 'false';
-const APP_ENV = process.env.APP_ENV || 'development';
-const SEND_ENDPOINT = '/send';
-const JSON_CONTENT_TYPE = 'application/json';
-const POST_METHOD = 'POST';
-const API_KEY_HEADER = 'x-api-key';
-const CONTENT_TYPE_HEADER = 'Content-Type';
-const PROVIDER_ERROR_STATUS = 500;
-const MAX_ATTEMPTS = 3;
+class Notifications {
+  #url
+  #apiKey
+  #enabled
+  #appEnv
+  #timeout
+  #maxAttempts
 
-// Determine which API key to use (per-env override or fallback to NOTIFY_API_KEY)
-function getNotifyApiKey() {
-  if (APP_ENV === 'staging' && process.env.STAGING_NOTIFY_API_KEY) {
-    return process.env.STAGING_NOTIFY_API_KEY;
-  }
-  if (APP_ENV === 'production' && process.env.PROD_NOTIFY_API_KEY) {
-    return process.env.PROD_NOTIFY_API_KEY;
-  }
-  return process.env.NOTIFY_API_KEY || 'test-key-123';
-}
-
-async function sendNotification(to, subject, message) {
-  if (!NOTIFICATIONS_ENABLED) {
-    return;
+  constructor(config) {
+    this.#url = config.url
+    this.#apiKey = config.apiKey
+    this.#enabled = config.enabled
+    this.#appEnv = config.appEnv
+    this.#timeout = config.timeout || 5000
+    this.#maxAttempts = config.maxAttempts || 3
   }
 
-  let lastError;
-  const apiKey = getNotifyApiKey();
+  async sendNotification(to, subject, message) {
+    if (!this.#enabled) {
+      return
+    }
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    let lastError
+    for (let attempt = 0; attempt < this.#maxAttempts; attempt++) {
+      try {
+        const response = await fetch(`${this.#url}/send`, {
+          method: METHOD_POST,
+          headers: {
+            [CONTENT_TYPE_HEADER]: CONTENT_TYPE_JSON,
+            [API_KEY_HEADER]: this.#apiKey
+          },
+          body: JSON.stringify({ to, subject, message }),
+          signal: AbortSignal.timeout(this.#timeout)
+        })
+
+        if (response.status === 500) {
+          lastError = new Error('Provider returned 500')
+          continue
+        }
+
+        if (!response.ok) {
+          console.error(`Failed to send notification: ${response.status}`)
+          return
+        }
+
+        return
+      } catch (error) {
+        lastError = error
+      }
+    }
+
+    console.error(`Failed to send notification after ${this.#maxAttempts} attempts:`, lastError)
+  }
+
+  async publishEvent(topic, payload) {
+    if (!this.#enabled) {
+      return
+    }
+
     try {
-      const response = await fetch(`${NOTIFICATIONS_URL}${SEND_ENDPOINT}`, {
-        method: POST_METHOD,
+      await fetch(`${this.#url}/topics/${topic}/publish`, {
+        method: METHOD_POST,
         headers: {
-          [CONTENT_TYPE_HEADER]: JSON_CONTENT_TYPE,
-          [API_KEY_HEADER]: apiKey
+          [CONTENT_TYPE_HEADER]: CONTENT_TYPE_JSON,
+          [API_KEY_HEADER]: this.#apiKey
         },
-        body: JSON.stringify({ to, subject, message })
-      });
-
-      if (response.status === PROVIDER_ERROR_STATUS) {
-        lastError = new Error(`Provider returned ${PROVIDER_ERROR_STATUS}`);
-        continue;
-      }
-
-      if (!response.ok) {
-        console.error(`Failed to send notification: ${response.status}`);
-        return;
-      }
-
-      // Success
-      return;
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(this.#timeout)
+      })
     } catch (error) {
-      lastError = error;
+      console.error(`Failed to publish event to topic ${topic}:`, error)
+      throw error
     }
   }
 
-  console.error('Failed to send notification after ' + MAX_ATTEMPTS + ' attempts:', lastError);
-}
-
-async function publishEvent(topic, payload) {
-  if (!NOTIFICATIONS_ENABLED) {
-    return;
+  async publishToUser(userId, payload) {
+    await this.publishEvent(`user-${userId}`, payload)
   }
 
-  try {
-    const apiKey = getNotifyApiKey();
-    await fetch(`${NOTIFICATIONS_URL}/topics/${topic}/publish`, {
-      method: POST_METHOD,
-      headers: {
-        [CONTENT_TYPE_HEADER]: JSON_CONTENT_TYPE,
-        [API_KEY_HEADER]: apiKey
-      },
-      body: JSON.stringify(payload)
-    });
-  } catch (error) {
-    console.error(`Failed to publish event to topic ${topic}:`, error);
-    throw error;
+  isEnabled() {
+    return this.#enabled
+  }
+
+  getAppEnv() {
+    return this.#appEnv
+  }
+
+  hasApiKey() {
+    return this.#apiKey != null
+  }
+
+  async getHealth() {
+    try {
+      const response = await fetch(`${this.#url}/health`, {
+        method: METHOD_GET,
+        headers: {
+          [API_KEY_HEADER]: this.#apiKey
+        },
+        signal: AbortSignal.timeout(this.#timeout)
+      })
+      return response.ok
+    } catch (error) {
+      console.error('Failed to check notification provider health:', error)
+      return false
+    }
+  }
+
+  async getSentList() {
+    try {
+      const response = await fetch(`${this.#url}/sent`, {
+        method: METHOD_GET,
+        headers: {
+          [API_KEY_HEADER]: this.#apiKey
+        },
+        signal: AbortSignal.timeout(this.#timeout)
+      })
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch sent notifications: ${response.status}`)
+      }
+
+      return response.json()
+    } catch (error) {
+      console.error('Failed to fetch sent notifications:', error)
+      throw error
+    }
   }
 }
 
-async function publishToUser(userId, payload) {
-  await publishEvent(`user-${userId}`, payload);
+function buildNotificationsConfig(env) {
+  const appEnv = env.APP_ENV || 'development'
+  const url = env.NOTIFICATIONS_URL || 'http://localhost:4002'
+  const enabled = env.NOTIFICATIONS_ENABLED !== 'false'
+
+  let apiKey = null
+  if (appEnv === 'staging' && env.STAGING_NOTIFY_API_KEY) {
+    apiKey = env.STAGING_NOTIFY_API_KEY
+  } else if (appEnv === 'production' && env.PROD_NOTIFY_API_KEY) {
+    apiKey = env.PROD_NOTIFY_API_KEY
+  } else if (env.NOTIFY_API_KEY) {
+    apiKey = env.NOTIFY_API_KEY
+  }
+
+  return {
+    url,
+    apiKey,
+    enabled,
+    appEnv,
+    timeout: parseInt(env.NOTIFICATIONS_TIMEOUT || '5000', 10),
+    maxAttempts: parseInt(env.NOTIFICATIONS_MAX_ATTEMPTS || '3', 10)
+  }
 }
 
 module.exports = {
-  sendNotification,
-  publishEvent,
-  publishToUser,
-  NOTIFICATIONS_ENABLED,
-  APP_ENV,
-  getNotifyApiKey
-};
+  Notifications,
+  buildNotificationsConfig
+}

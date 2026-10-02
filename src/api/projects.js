@@ -1,10 +1,9 @@
 
 const { logAction } = require('./logging');
-const { publishEvent } = require('./notifications');
 
 const PROJECTS_TABLE = 'projects';
 
-function registerProjectRoutes(app, requireAuth, db) {
+function registerProjectRoutes(app, requireAuth, db, notifications) {
   app.post('/projects', requireAuth, async (req, res) => {
     const { name, description } = req.body;
 
@@ -49,7 +48,7 @@ function registerProjectRoutes(app, requireAuth, db) {
         description: trimmedDescription || null
       });
 
-      await publishEvent(PROJECTS_TABLE, {
+      await notifications.publishEvent(PROJECTS_TABLE, {
         type: 'project.created',
         project,
         by: req.user.username
@@ -172,7 +171,7 @@ function registerProjectRoutes(app, requireAuth, db) {
 
       await logAction(db, req.user.id, req.user.username, 'update_project', parseInt(id), changes);
 
-      await publishEvent(PROJECTS_TABLE, {
+      await notifications.publishEvent(PROJECTS_TABLE, {
         type: 'project.updated',
         project,
         by: req.user.username
@@ -212,7 +211,7 @@ function registerProjectRoutes(app, requireAuth, db) {
 
       await logAction(db, req.user.id, req.user.username, 'delete_project', parseInt(id), {});
 
-      await publishEvent(PROJECTS_TABLE, {
+      await notifications.publishEvent(PROJECTS_TABLE, {
         type: 'project.deleted',
         project,
         by: req.user.username

@@ -13,10 +13,8 @@ const { registerBulkRoutes } = require('./bulk');
 const { registerInitiativeRoutes } = require('./initiatives');
 const { registerV2Routes } = require('./v2');
 const { Db } = require('./db');
-const { NOTIFICATIONS_ENABLED, APP_ENV, getNotifyApiKey } = require('./notifications');
+const { Notifications, buildNotificationsConfig } = require('./notifications');
 
-const DEFAULT_NOTIFICATIONS_URL = 'http://localhost:4002';
-const API_KEY_HEADER = 'x-api-key';
 const PROJECTS_TABLE = 'projects';
 const CURRENT_PROJECT_ENDPOINT = '/me/current-project';
 
@@ -26,18 +24,19 @@ const port = process.env.PORT || 3000;
 const db = new Db();
 const auth = new Auth(parseUsers(process.env.APP_USERS || 'alice:password1,bob:password2,carol:password3'));
 const requireAuth = (req, res, next) => auth.requireAuth(req, res, next);
+const notifications = new Notifications(buildNotificationsConfig(process.env));
 
 app.use(express.json());
 app.use(express.static('/Users/wrigjame/code/todo_test/src/ui'));
 
-console.log(`Notifications ${NOTIFICATIONS_ENABLED ? 'enabled' : 'disabled'}, environment: ${APP_ENV}`);
+console.log(`Notifications ${notifications.isEnabled() ? 'enabled' : 'disabled'}, environment: ${notifications.getAppEnv()}`);
 
 console.log('Starting fake services...');
 startFakeDatabase();
 startFakeFileDatabase();
 new NotificationServer(process.env.FAKE_NOTIFY_PORT || 4002, process.env.FAKE_NOTIFY_API_KEY || 'test-key-123').start();
 
-function registerRoutes(app, port, db, auth, requireAuth, NOTIFICATIONS_ENABLED, APP_ENV, getNotifyApiKey, registerProjectRoutes, registerBulkRoutes, registerTodoRoutes, registerLinkRoutes, registerBlockerRoutes, registerCommentRoutes, registerAssigneeRoutes, registerInitiativeRoutes, registerV2Routes) {
+function registerRoutes(app, port, db, auth, requireAuth, notifications, registerProjectRoutes, registerBulkRoutes, registerTodoRoutes, registerLinkRoutes, registerBlockerRoutes, registerCommentRoutes, registerAssigneeRoutes, registerInitiativeRoutes, registerV2Routes) {
   app.get('/health', async (req, res) => {
     try {
       const dbResponse = await fetch(`${db.getBaseURL()}/health`);
@@ -48,9 +47,9 @@ function registerRoutes(app, port, db, auth, requireAuth, NOTIFICATIONS_ENABLED,
         database: dbStatus.status,
         databaseKind: db.getDatabaseName(),
         notifications: {
-          enabled: NOTIFICATIONS_ENABLED,
-          env: APP_ENV,
-          key_configured: !!getNotifyApiKey()
+          enabled: notifications.isEnabled(),
+          env: notifications.getAppEnv(),
+          key_configured: notifications.hasApiKey()
         }
       });
     } catch (error) {
@@ -59,9 +58,9 @@ function registerRoutes(app, port, db, auth, requireAuth, NOTIFICATIONS_ENABLED,
         database: 'unavailable',
         databaseKind: db.getDatabaseName(),
         notifications: {
-          enabled: NOTIFICATIONS_ENABLED,
-          env: APP_ENV,
-          key_configured: !!getNotifyApiKey()
+          enabled: notifications.isEnabled(),
+          env: notifications.getAppEnv(),
+          key_configured: notifications.hasApiKey()
         }
       });
     }
@@ -98,17 +97,7 @@ function registerRoutes(app, port, db, auth, requireAuth, NOTIFICATIONS_ENABLED,
   // Get sent notifications (proxy to provider)
   app.get('/notifications/sent', requireAuth, async (req, res) => {
     try {
-      const notificationsUrl = process.env.NOTIFICATIONS_URL || DEFAULT_NOTIFICATIONS_URL;
-      const apiKey = getNotifyApiKey();
-
-      const response = await fetch(`${notificationsUrl}/sent`, {
-        method: 'GET',
-        headers: {
-          [API_KEY_HEADER]: apiKey
-        }
-      });
-
-      const data = await response.json();
+      const data = await notifications.getSentList();
       res.json(data);
     } catch (error) {
       res.status(500).json({ error: 'failed to fetch notifications' });
@@ -117,26 +106,12 @@ function registerRoutes(app, port, db, auth, requireAuth, NOTIFICATIONS_ENABLED,
 
   app.get('/notifications/status', requireAuth, async (req, res) => {
     try {
-      const notificationsUrl = process.env.NOTIFICATIONS_URL || DEFAULT_NOTIFICATIONS_URL;
-      const apiKey = getNotifyApiKey();
-      let providerReachable = false;
-
-      try {
-        const healthResponse = await fetch(`${notificationsUrl}/health`, {
-          method: 'GET',
-          headers: {
-            [API_KEY_HEADER]: apiKey
-          }
-        });
-        providerReachable = healthResponse.ok;
-      } catch (error) {
-        providerReachable = false;
-      }
+      const providerReachable = await notifications.getHealth();
 
       res.json({
-        enabled: NOTIFICATIONS_ENABLED,
-        env: APP_ENV,
-        key_configured: !!getNotifyApiKey(),
+        enabled: notifications.isEnabled(),
+        env: notifications.getAppEnv(),
+        key_configured: notifications.hasApiKey(),
         provider_reachable: providerReachable
       });
     } catch (error) {
@@ -144,7 +119,7 @@ function registerRoutes(app, port, db, auth, requireAuth, NOTIFICATIONS_ENABLED,
     }
   });
 
-  registerProjectRoutes(app, requireAuth, db);
+  registerProjectRoutes(app, requireAuth, db, notifications);
 
   app.put(CURRENT_PROJECT_ENDPOINT, requireAuth, async (req, res) => {
     const { project_id } = req.body;
@@ -183,19 +158,19 @@ function registerRoutes(app, port, db, auth, requireAuth, NOTIFICATIONS_ENABLED,
   // Register bulk routes (before todo routes so specific paths match first)
   registerBulkRoutes(app, requireAuth, db);
 
-  registerTodoRoutes(app, requireAuth, db, auth);
+  registerTodoRoutes(app, requireAuth, db, auth, notifications);
 
   registerLinkRoutes(app, requireAuth, db);
 
   registerBlockerRoutes(app, requireAuth, db);
 
-  registerCommentRoutes(app, requireAuth, db, auth);
+  registerCommentRoutes(app, requireAuth, db, auth, notifications);
 
-  registerAssigneeRoutes(app, requireAuth, db, auth);
+  registerAssigneeRoutes(app, requireAuth, db, auth, notifications);
 
-  registerInitiativeRoutes(app, requireAuth, db);
+  registerInitiativeRoutes(app, requireAuth, db, notifications);
 
-  registerV2Routes(app, requireAuth, db, auth);
+  registerV2Routes(app, requireAuth, db, auth, notifications);
 
   app.listen(port, () => {
     console.log(`Todo app running on port ${port}`);
@@ -203,4 +178,4 @@ function registerRoutes(app, port, db, auth, requireAuth, NOTIFICATIONS_ENABLED,
 }
 
 // Give services a moment to start
-setTimeout(() => registerRoutes(app, port, db, auth, requireAuth, NOTIFICATIONS_ENABLED, APP_ENV, getNotifyApiKey, registerProjectRoutes, registerBulkRoutes, registerTodoRoutes, registerLinkRoutes, registerBlockerRoutes, registerCommentRoutes, registerAssigneeRoutes, registerInitiativeRoutes, registerV2Routes), 500);
+setTimeout(() => registerRoutes(app, port, db, auth, requireAuth, notifications, registerProjectRoutes, registerBulkRoutes, registerTodoRoutes, registerLinkRoutes, registerBlockerRoutes, registerCommentRoutes, registerAssigneeRoutes, registerInitiativeRoutes, registerV2Routes), 500);

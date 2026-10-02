@@ -1,6 +1,5 @@
 
 const { logAction } = require('./logging');
-const { sendNotification, publishToUser } = require('./notifications');
 
 const TODO_USERS_TABLE = 'todo_users';
 
@@ -29,7 +28,7 @@ async function getAssignees(db, auth, todoId) {
   }
 }
 
-function registerAssigneeRoutes(app, requireAuth, db, auth) {
+function registerAssigneeRoutes(app, requireAuth, db, auth, notifications) {
   app.post('/todos/:id/users', requireAuth, async (req, res) => {
     const { id } = req.params;
     const { user_id } = req.body;
@@ -69,12 +68,12 @@ function registerAssigneeRoutes(app, requireAuth, db, auth) {
         assigned_user_id: parseInt(user_id)
       });
 
-      await sendNotification(
+      await notifications.sendNotification(
         user.username,
         'You were assigned a todo',
         `You were assigned to todo: ${todo.title}`
       );
-      await publishToUser(user.id, {
+      await notifications.publishToUser(user.id, {
         type: 'todo.assigned',
         todo,
         assigned_by: req.user.username
