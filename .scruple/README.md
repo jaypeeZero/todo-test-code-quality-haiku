@@ -21,9 +21,9 @@ A deliberate exception is recorded at the site with a reason after `--`:
 
 `comments/require-justified-suppressions` flags a suppression with no reason.
 
-## Bumping a git-pinned plugin
+## Picking up changes to a git-tracked plugin
 
-`scruple-plugin-ideology` and `scruple-provider-cache` are git dependencies pinned to a tag. Changing the tag in `package.json` is not enough: npm treats a lockfile entry for the same repository as already satisfying a `#<tag>` spec, so `npm install` keeps the old commit and `npm ci` installs it. After changing the tag, force the entry to re-resolve:
+`scruple-plugin-ideology` and `scruple-provider-cache` are git dependencies that track `main`. The lockfile records the exact commit, and npm keeps that commit until the entry is re-resolved, so `npm install` and `npm ci` do not pick up new commits on their own. To pull the latest `main`:
 
 ```sh
 npm --prefix .scruple update scruple-plugin-ideology
@@ -35,6 +35,6 @@ Confirm the lockfile moved before running the lint:
 jq '.packages["node_modules/scruple-plugin-ideology"] | {version, resolved}' .scruple/package-lock.json
 ```
 
-`version` must match the tag and `resolved` must end in that tag's commit sha. The same steps apply to `scruple-provider-cache`.
+`resolved` must end in the commit sha you expect from `main`. The same steps apply to `scruple-provider-cache`.
 
 `Plugin <name> does not provide rule <id>` at startup means a rule listed in `scruple.config.ts` is missing from the installed plugin, usually because the bump above did not land.

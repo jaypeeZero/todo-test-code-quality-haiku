@@ -14,7 +14,7 @@
     "@scruple/provider-jev": "^0.3.4",
     "@scruple/relational-databases": "^0.3.4",
     "@scruple/tests": "^0.3.4",
-    "scruple-plugin-ideology": "git+https://github.com/jaypeeZero/scruple-plugin-ideology.git#v0.3.0",
-    "scruple-provider-cache": "git+https://github.com/jaypeeZero/scruple-provider-cache.git#v0.1.0"
+    "scruple-plugin-ideology": "git+https://github.com/jaypeeZero/scruple-plugin-ideology.git#main",
+    "scruple-provider-cache": "git+https://github.com/jaypeeZero/scruple-provider-cache.git#main"
   }
 }
