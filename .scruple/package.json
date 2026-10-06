@@ -5,14 +5,15 @@
   "license": "UNLICENSED",
   "type": "module",
   "devDependencies": {
-    "@scruple/cli": "^0.2.0",
-    "@scruple/comments": "^0.2.0",
-    "@scruple/core": "^0.2.0",
-    "@scruple/errors": "^0.2.0",
-    "@scruple/parser-oxc": "^0.2.0",
-    "@scruple/provider-jev": "^0.2.0",
-    "@scruple/relational-databases": "^0.2.0",
-    "@scruple/tests": "^0.2.0",
+    "@scruple/cli": "^0.3.4",
+    "@scruple/comments": "^0.3.4",
+    "@scruple/core": "^0.3.4",
+    "@scruple/errors": "^0.3.4",
+    "@scruple/parser-oxc": "^0.3.4",
+    "@scruple/provider-decider": "^0.3.4",
+    "@scruple/provider-jev": "^0.3.4",
+    "@scruple/relational-databases": "^0.3.4",
+    "@scruple/tests": "^0.3.4",
     "scruple-plugin-ideology": "git+https://github.com/jaypeeZero/scruple-plugin-ideology.git#v0.3.0",
     "scruple-provider-cache": "git+https://github.com/jaypeeZero/scruple-provider-cache.git#v0.1.0"
   }

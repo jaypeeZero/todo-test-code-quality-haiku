@@ -1,6 +1,6 @@
 import { defineConfig } from '@scruple/core'
 import { oxcParser } from '@scruple/parser-oxc'
-import { jevProvider } from '@scruple/provider-jev'
+import { deciderProvider } from '@scruple/provider-decider'
 import { errors } from '@scruple/errors'
 import { comments } from '@scruple/comments'
 import { tests } from '@scruple/tests'
@@ -15,7 +15,7 @@ if (apiKey === undefined) {
 
 export default defineConfig({
   parser: oxcParser(),
-  provider: cachedProvider(jevProvider({ apiKey }), {  // pins jev-1.13.0
+  provider: cachedProvider(deciderProvider({ model: process.env['DECIDER_MODEL'] ?? 'Mapika/decider-4b' }), {
     enabled: process.env['SCRUPLE_CACHE'] !== 'off'    // SCRUPLE_CACHE=off forces a live run
   }),
   include: ['src/**/*.js', 'fake_external_services/**/*.js'],

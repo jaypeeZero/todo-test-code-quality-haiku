@@ -11,7 +11,7 @@ The CLI is `node_modules/@scruple/cli/dist/bin.js`, run with `-c scruple.config.
 
 ## Config
 
-`scruple.config.ts` enables the `errors`, `comments`, `tests`, `relational-databases`, and `ideology` plugins, and wraps the Jev provider in `cachedProvider` from `scruple-provider-cache`. A rule runs only when it is listed under `rules`; the comment on each line is the principle it enforces.
+`scruple.config.ts` enables the `errors`, `comments`, `tests`, `relational-databases`, and `ideology` plugins, and wraps the local Decider provider (`http://127.0.0.1:8000`) in `cachedProvider` from `scruple-provider-cache`. A rule runs only when it is listed under `rules`; the comment on each line is the principle it enforces.
 
 A deliberate exception is recorded at the site with a reason after `--`:
 
